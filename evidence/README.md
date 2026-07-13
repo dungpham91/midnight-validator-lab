@@ -30,7 +30,7 @@ So the sensible pattern is:
 
 ```bash
 # on the host, as root
-sudo ./scripts/setup_node.sh --stage prereqs,secrets,cardano,postgres,dbsync \
+sudo ./scripts/setup_node.sh --stage prereqs,secrets,mithril,cardano,postgres,dbsync \
      --db-secret midnight-validator-lab-preprod/postgres
 ```
 Leave `cardano-db-sync` running overnight. Nothing to capture yet.

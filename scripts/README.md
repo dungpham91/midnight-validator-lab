@@ -32,7 +32,7 @@ dbsync verify-sync midnight keys env service verify`.
 sudo ./setup_node.sh --dry-run
 
 # PHASE A — bring up Cardano + start DB Sync, then leave it to sync (hours)
-sudo ./setup_node.sh --stage prereqs,secrets,cardano,postgres,dbsync \
+sudo ./setup_node.sh --stage prereqs,secrets,mithril,cardano,postgres,dbsync \
      --db-secret midnight-validator-lab-preprod/postgres
 
 # ...wait until db-sync is ~99% (check: sudo -u midnight psql -d cexplorer -c "…" — see RUNBOOK §2.5)

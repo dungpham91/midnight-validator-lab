@@ -87,6 +87,7 @@ function is_dry_run() { [[ "${dry_run}" == true ]]; }
 
 # run a command, or just log it in dry-run mode
 function run() {
+    local IFS=' '   # join $* with spaces in logs (global IFS is \n\t); does not affect "$@"
     if is_dry_run; then log_info "[dry-run] $*"; return 0; fi
     log_debug "exec: $*"
     "$@"
@@ -185,6 +186,7 @@ function stage_mithril() {
     log_info "downloading Cardano ${network} DB snapshot via Mithril"
     run_as_user "mkdir -p \$HOME/tmp/mithril && cd \$HOME/tmp/mithril && \
         curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/input-output-hk/mithril/refs/heads/main/mithril-install.sh | sh -s -- -c mithril-client -d unstable -p \$(pwd) && \
+        export CARDANO_NETWORK=${network} && \
         export AGGREGATOR_ENDPOINT=https://aggregator.release-${network}.api.mithril.network/aggregator && \
         export GENESIS_VERIFICATION_KEY=\$(wget -q -O - https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/release-${network}/genesis.vkey) && \
         export ANCILLARY_VERIFICATION_KEY=\$(wget -q -O - https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/release-${network}/ancillary.vkey) && \
@@ -194,6 +196,10 @@ function stage_mithril() {
 # ─── Stage: cardano-node ──────────────────────────────────────────────────────────────
 function stage_cardano() {
     log_info "installing cardano-node ${CARDANO_NODE_VERSION} (checksum-verified) and its systemd service"
+    if ! is_dry_run && [[ ! -d "$(user_home)/tmp/mithril/db" ]]; then
+        log_warn "no Mithril snapshot at $(user_home)/tmp/mithril/db — cardano-node will sync from GENESIS"
+        log_warn "(much slower; may not finish overnight). Run the 'mithril' stage first for a fast bootstrap."
+    fi
     local base="cardano-node-${CARDANO_NODE_VERSION}-linux-amd64.tar.gz"
     local rel="https://github.com/IntersectMBO/cardano-node/releases/download/${CARDANO_NODE_VERSION}"
     # Download to disk, verify against the published sha256sums, then extract.
@@ -202,7 +208,7 @@ function stage_cardano() {
         curl -L -O '${rel}/cardano-node-${CARDANO_NODE_VERSION}-sha256sums.txt' && \
         sha256sum -c cardano-node-${CARDANO_NODE_VERSION}-sha256sums.txt --ignore-missing && \
         tar -xz -f '${base}' -C \$HOME/.local/bin   --strip-components=2 ./bin && \
-        tar -xz -f '${base}' -C \$HOME/.local/share --strip-components=1 ./share && \
+        tar -xz -f '${base}' -C \$HOME/.local/share --strip-components=2 ./share && \
         chmod +x \$HOME/.local/bin/cardano-* && \
         mkdir -p \$HOME/cardano-data && ([ -d \$HOME/tmp/mithril/db ] && mv \$HOME/tmp/mithril/db \$HOME/cardano-data/ || true)"
 
@@ -526,7 +532,7 @@ Options:
 
 Examples:
   sudo ${SCRIPT_NAME} --dry-run
-  sudo ${SCRIPT_NAME} --stage prereqs,secrets,cardano,postgres,dbsync --db-secret midnight-validator-lab-preprod/postgres
+  sudo ${SCRIPT_NAME} --stage prereqs,secrets,mithril,cardano,postgres,dbsync --db-secret midnight-validator-lab-preprod/postgres
   sudo ${SCRIPT_NAME} --stage service --wait-sync
 EOF
 }

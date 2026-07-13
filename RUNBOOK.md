@@ -9,9 +9,9 @@
 > additions (hardware/IOPS notes, gotchas, ordering guidance, teardown) are called out as
 > `Gotcha` / `NOTE` blocks so they are additive, never a silent rewrite of the source.
 >
-> **`[USER]` placeholder.** The upstream Cardano page uses a literal `[USER]`; the Midnight
-> pages hardcode `midnight`. This runbook standardises on the service account **`midnight`**
-> — wherever a block shows `[USER]`, replace it with `midnight` (or your own Linux user).
+> **Service account.** This runbook uses the dedicated **`midnight`** service account (created
+> in §1.3) for every path and systemd unit. If you run as a different Linux user, substitute it
+> throughout.
 
 ---
 
@@ -190,11 +190,20 @@ ARCH="linux-amd64"
 URL="https://github.com/IntersectMBO/cardano-node/releases/download/${VERSION}/cardano-node-${VERSION}-${ARCH}.tar.gz"
 
 curl -L "$URL" | tar -xz -C ~/.local/bin --strip-components=2 ./bin
-curl -L "$URL" | tar -xz -C ~/.local/share --strip-components=1 ./share
+curl -L "$URL" | tar -xz -C ~/.local/share --strip-components=2 ./share
 chmod +x ~/.local/bin/cardano-*
 
 cardano-node --version
 ```
+> **Gotcha — `share` extraction (corrected from the source docs).** The upstream doc extracts
+> `share` with `--strip-components=1`, but the tarball entries are `./share/preprod/...`, so
+> `1` lands the files at `~/.local/share/**share**/preprod/config.json` while the systemd unit
+> (and the db-sync `NodeConfigFile`) expect `~/.local/share/preprod/config.json`. With the
+> doc's value cardano-node **fails to start** ("config not found") and nothing syncs. Use
+> **`--strip-components=2`** (as above) so configs land at `~/.local/share/preprod/`. Verified
+> against the real 10.6.2 tarball. `scripts/setup_node.sh` already uses `2`. Sanity-check after:
+> `ls ~/.local/share/preprod/config.json`.
+>
 > **NOTE (added) — verify the download (supply chain).** The release ships
 > `cardano-node-10.6.2-sha256sums.txt`. To check before trusting the binary:
 > ```bash
@@ -210,8 +219,7 @@ mv ~/tmp/mithril/db/ ~/cardano-data/
 ```
 
 **2.2.3 Configure the systemd service**
-Create `/etc/systemd/system/cardano-node.service`. Replace `[USER]` with your Linux username
-(`midnight`).
+Create `/etc/systemd/system/cardano-node.service` (uses the `midnight` service account):
 ```ini
 [Unit]
 Description=Cardano Relay Node (Preprod)
@@ -219,16 +227,16 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-User=[USER]
+User=midnight
 Type=simple
-WorkingDirectory=/home/[USER]/cardano-data
-ExecStart=/home/[USER]/.local/bin/cardano-node run \
-    --topology /home/[USER]/.local/share/preprod/topology.json \
-    --database-path /home/[USER]/cardano-data/db \
-    --socket-path /home/[USER]/cardano-data/db/node.socket \
+WorkingDirectory=/home/midnight/cardano-data
+ExecStart=/home/midnight/.local/bin/cardano-node run \
+    --topology /home/midnight/.local/share/preprod/topology.json \
+    --database-path /home/midnight/cardano-data/db \
+    --socket-path /home/midnight/cardano-data/db/node.socket \
     --host-addr 0.0.0.0 \
     --port 3001 \
-    --config /home/[USER]/.local/share/preprod/config.json
+    --config /home/midnight/.local/share/preprod/config.json
 KillSignal=SIGINT
 Restart=always
 RestartSec=5
@@ -278,7 +286,10 @@ CREATE DATABASE cexplorer;
 export POSTGRES_PASSWORD='your_secure_password'
 export PGPASSFILE="${HOME}/.pgpass"
 
-echo "/var/run/postgresql:5432:cexplorer:midnight:$POSTGRES_PASSWORD" > "$PGPASSFILE"
+# Write both the Unix-socket and localhost/TCP entries so socket auth AND `-h localhost` work.
+printf '%s\n%s\n' \
+  "/var/run/postgresql:5432:cexplorer:midnight:$POSTGRES_PASSWORD" \
+  "localhost:5432:cexplorer:midnight:$POSTGRES_PASSWORD" > "$PGPASSFILE"
 chmod 0600 "$PGPASSFILE"
 ```
 
@@ -304,8 +315,9 @@ sudo systemctl restart postgresql   # apply the tuning
 ```bash
 NETWORK="preprod"
 mkdir -p ~/tmp && cd ~/tmp
-curl -L -O https://github.com/IntersectMBO/cardano-db-sync/releases/download/13.6.0.5/cardano-db-sync-13.6.0.7-linux.tar.gz
-tar -xzf cardano-db-sync-13.6.0.7-linux.tar.gz
+# matched tag+filename (see Gotcha below — the upstream doc mismatched these and 404s)
+curl -L -O https://github.com/IntersectMBO/cardano-db-sync/releases/download/13.6.0.5/cardano-db-sync-13.6.0.5-linux.tar.gz
+tar -xzf cardano-db-sync-13.6.0.5-linux.tar.gz
 
 cp bin/* ~/.local/bin/
 mkdir -p ~/cardano-data/
@@ -313,16 +325,15 @@ sudo mv ~/tmp/schema ~/cardano-data/
 
 cd ~/cardano-data
 curl -O https://book.world.dev.cardano.org/environments/$NETWORK/db-sync-config.json
-sed -i "s|\"NodeConfigFile\": \"config.json\"|\"NodeConfigFile\": \"/home/[USER]/.local/share/$NETWORK/config.json\"|" ~/cardano-data/db-sync-config.json
+sed -i "s|\"NodeConfigFile\": \"config.json\"|\"NodeConfigFile\": \"/home/midnight/.local/share/$NETWORK/config.json\"|" ~/cardano-data/db-sync-config.json
 ```
 
-> **Gotcha — version mismatch in the upstream command (reproduced verbatim above).** The URL
+> **Gotcha — version mismatch in the upstream doc (corrected above).** The upstream doc's URL
 > mixes tag **`13.6.0.5`** with filename **`13.6.0.7`**, so it 404s. Verified against the
 > releases page: each tag ships a matching asset — tag `13.6.0.5` → `cardano-db-sync-13.6.0.5-linux.tar.gz`,
-> tag `13.6.0.7` → `cardano-db-sync-13.6.0.7-linux.tar.gz`. Use a **matched pair**. The
-> automated `scripts/setup_node.sh` already does this (tag and filename both `13.6.0.5`).
+> tag `13.6.0.7` → `cardano-db-sync-13.6.0.7-linux.tar.gz`. The command above uses the matched
+> pair `13.6.0.5`; `scripts/setup_node.sh` does the same.
 > Releases: https://github.com/IntersectMBO/cardano-db-sync/releases
-> Also replace `[USER]` in the `sed` target with `midnight`.
 >
 > **Supply chain:** unlike cardano-node and midnight-node, cardano-db-sync ships **no checksum
 > file** for this release, so the download can't be checksum-verified from upstream. Pull it
@@ -350,15 +361,15 @@ After=cardano-node.service
 Requires=cardano-node.service
 
 [Service]
-User=[USER]
+User=midnight
 Type=simple
-Environment="PGPASSFILE=/home/[USER]/.pgpass"
-WorkingDirectory=/home/[USER]/cardano-data
-ExecStart=/home/[USER]/.local/bin/cardano-db-sync \
-    --config /home/[USER]/cardano-data/db-sync-config.json \
-    --socket-path /home/[USER]/cardano-data/db/node.socket \
-    --schema-dir /home/[USER]/cardano-data/schema \
-    --state-dir /home/[USER]/cardano-data/db-sync-state
+Environment="PGPASSFILE=/home/midnight/.pgpass"
+WorkingDirectory=/home/midnight/cardano-data
+ExecStart=/home/midnight/.local/bin/cardano-db-sync \
+    --config /home/midnight/cardano-data/db-sync-config.json \
+    --socket-path /home/midnight/cardano-data/db/node.socket \
+    --schema-dir /home/midnight/cardano-data/schema \
+    --state-dir /home/midnight/cardano-data/db-sync-state
 KillSignal=SIGINT
 Restart=always
 RestartSec=10
@@ -414,7 +425,7 @@ curl -L -O https://github.com/midnightntwrk/midnight-node/releases/download/node
 tar -xvzf midnight-node-0.22.2-linux-amd64.tar.gz
 
 mv ~/tmp/midnight-node ~/.local/bin/
-mv ~/tmp/res ~/res
+rm -rf ~/res && mv ~/tmp/res ~/res    # see Gotcha: plain 'mv ~/tmp/res ~/res' would nest
 source ~/.bashrc
 midnight-node --version
 ```
@@ -424,12 +435,10 @@ midnight-node --version
 > cd ~/tmp && curl -L -O https://github.com/midnightntwrk/midnight-node/releases/download/node-0.22.2/SHA256SUMS-amd64
 > sha256sum -c SHA256SUMS-amd64 --ignore-missing
 > ```
-> **Gotcha — `~/res` nesting.** §3.1.1 pre-creates `~/res`, so `mv ~/tmp/res ~/res` moves the
-> folder *into* it → `~/res/res/preprod/...`, but §5 expects `~/res/preprod/...`. Use one of:
-> ```bash
-> rm -rf ~/res && mv ~/tmp/res ~/res      # or:  mv ~/tmp/res/* ~/res/
-> ```
-> `scripts/setup_node.sh` already does this correctly.
+> **Gotcha — `~/res` nesting (corrected above).** §3.1.1 pre-creates `~/res`, so the doc's plain
+> `mv ~/tmp/res ~/res` moves the folder *into* it → `~/res/res/preprod/...`, but §5 expects
+> `~/res/preprod/...`. The `rm -rf ~/res && mv` above avoids that; `scripts/setup_node.sh` does
+> the same.
 
 ### 3.2 Manage validator keys
 
@@ -613,12 +622,10 @@ echo $POSTGRES_PASSWORD
 psql -h localhost -p 5432 -U midnight -d cexplorer -c "SELECT 'PostgreSQL Connection Verified' AS status;"
 ```
 
-> **Gotcha — `.pgpass` is keyed to the socket, not TCP.** §2.3.3 writes the `.pgpass` entry
-> for host `/var/run/postgresql` (the Unix socket), but the verify command above connects over
-> TCP (`-h localhost`), so `.pgpass` won't match and psql will prompt for a password. Either
-> verify over the socket (`psql -d cexplorer -c "SELECT 1;"`) or pass the password explicitly
-> (`PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost ...`). The node itself is unaffected —
-> its `.env` connection string embeds the password.
+> **NOTE — `.pgpass` covers socket + TCP.** §2.3.3 writes both a `/var/run/postgresql` (socket)
+> and a `localhost` (TCP) entry, so the `-h localhost` verify above authenticates via `.pgpass`
+> without prompting. (The upstream doc wrote only the socket entry, which made this TCP verify
+> prompt for a password — corrected here and in `scripts/setup_node.sh`.)
 
 **5.1.2 Create the `.env` file** (`~/.env`)
 ```dotenv
@@ -656,7 +663,7 @@ CROSS_CHAIN_SEED_FILE='/home/midnight/keystore/6772616...'
 > grandpa) prefix — i.e. swapped. The launch command in §5.2 loads keys automatically from
 > `--base-path .../data/chains/midnight_preprod/keystore`, so these `*_SEED_FILE` values are
 > informational; if you actually wire them, fix the swap and point them at the real hex-named
-> files created by §3.3.
+> files created by §3.3. (`scripts/setup_node.sh` omits these lines entirely, for this reason.)
 
 ### 5.2 Perform an interactive test launch
 ```bash
@@ -670,12 +677,13 @@ midnight-node \
     --validator \
     --pool-limit 35 \
     --name ${NODE_NAME} \
-    --rpc-port 9933
+    --rpc-port 9933 \
+    --prometheus-external --prometheus-port 9615
 ```
 
-> **NOTE (added) — expose Prometheus metrics for §Monitoring.** To let Prometheus scrape the
-> node (see `monitoring/`), add `--prometheus-external --prometheus-port 9615` to the launch
-> command and the systemd `ExecStart` below.
+> **NOTE (added) — Prometheus metrics for §Monitoring.** The `--prometheus-external
+> --prometheus-port 9615` flags (included in the launch above and the §5.3 unit) expose node
+> metrics on `:9615` for the monitoring stack to scrape — matching `scripts/setup_node.sh`.
 >
 > **Gotcha — telemetry URL.** The `--telemetry-url` value is reproduced verbatim from the
 > docs, including the trailing dot in `telemetry.shielded.tools.` — a trailing-dot FQDN is
@@ -711,7 +719,8 @@ ExecStart=/home/midnight/.local/bin/midnight-node \
     --validator \
     --pool-limit 35 \
     --name ${NODE_NAME} \
-    --rpc-port 9933
+    --rpc-port 9933 \
+    --prometheus-external --prometheus-port 9615
 
 Restart=on-failure
 RestartSec=10
