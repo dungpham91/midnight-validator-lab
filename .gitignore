@@ -17,9 +17,10 @@ wg0.conf
 *.key
 *.pem
 
-# Alertmanager Slack webhook (real file kept out of VCS; .example IS committed)
-monitoring/alertmanager/secrets/slack_api_url
-!monitoring/alertmanager/secrets/slack_api_url.example
+# Alertmanager Slack webhooks — one per channel (real files kept out of VCS; .example committed)
+monitoring/alertmanager/secrets/slack_alerts
+monitoring/alertmanager/secrets/slack_critical
+!monitoring/alertmanager/secrets/*.example
 
 # ─── Script output ──────────────────────────────────────────────────────────────
 health-reports/

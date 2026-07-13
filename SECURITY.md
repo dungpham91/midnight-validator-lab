@@ -231,8 +231,9 @@ wired up in Terraform today:
   The VPC's **default security group is locked** (deny all).
 - **IMDSv2 required** (`http_tokens = required`, hop limit 1) to blunt SSRF credential theft.
 - **Network audit trail**: **VPC flow logs** to an encrypted CloudWatch log group.
-- **Slack webhook**: single source of truth in Secrets Manager, materialised to a `0600` file
-  for Alertmanager / the health checker (see `monitoring/README.md` — never in git or config).
+- **Slack webhooks**: both per-channel webhooks live in one Secrets Manager secret (JSON
+  `{alerts, critical}`), materialised to per-channel `0600` files for Alertmanager and the
+  critical webhook to the health checker (see `monitoring/README.md` — never in git or config).
 - **Supply chain**: `scripts/setup_node.sh` and the runbook verify SHA-256 checksums for the
   cardano-node and midnight-node downloads before use (cardano-db-sync ships no upstream
   checksum — noted as a known gap). CI runs **gitleaks** as the secret-scanning gate.

@@ -135,11 +135,11 @@ resource "aws_secretsmanager_secret_version" "db" {
   })
 }
 
-# ── Secrets Manager: optional Slack webhook ───────────────────────────────────────────
+# ── Secrets Manager: optional Slack webhooks (one per channel, stored as one JSON secret) ──
 resource "aws_secretsmanager_secret" "slack" {
   count                   = local.slack_enabled ? 1 : 0
-  name                    = "${local.name_prefix}/slack-webhook"
-  description             = "Slack incoming webhook for node-health alerts"
+  name                    = "${local.name_prefix}/slack-webhooks"
+  description             = "Slack incoming webhooks per channel: {alerts, critical}"
   kms_key_id              = aws_kms_key.main.arn
   recovery_window_in_days = 0
   #checkov:skip=CKV2_AWS_57:Automatic rotation needs a rotation Lambda; out of lab scope
@@ -148,9 +148,12 @@ resource "aws_secretsmanager_secret" "slack" {
 }
 
 resource "aws_secretsmanager_secret_version" "slack" {
-  count         = local.slack_enabled ? 1 : 0
-  secret_id     = aws_secretsmanager_secret.slack[0].id
-  secret_string = var.slack_webhook_url
+  count     = local.slack_enabled ? 1 : 0
+  secret_id = aws_secretsmanager_secret.slack[0].id
+  secret_string = jsonencode({
+    alerts   = var.slack_webhook_alerts   # -> #midnight-alerts (warnings)
+    critical = var.slack_webhook_critical # -> #midnight-critical
+  })
 }
 
 # ── IAM: instance role (SSM + least-privilege secret read) ────────────────────────────

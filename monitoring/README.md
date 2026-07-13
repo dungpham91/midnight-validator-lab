@@ -14,7 +14,7 @@ monitoring/
 │   └── alert.rules.yml                    # alert definitions
 ├── alertmanager/
 │   ├── alertmanager.yml                   # routing → Slack (severity-based channels)
-│   └── secrets/slack_api_url.example      # copy to slack_api_url (git-ignored) + paste webhook
+│   └── secrets/{slack_alerts,slack_critical}.example  # one webhook per channel (git-ignored reals)
 └── grafana/
     ├── provisioning/                      # auto-wire datasource + dashboard
     └── dashboards/midnight-node.json      # block height, peers, host resources
@@ -50,50 +50,71 @@ curl -s http://localhost:9615/metrics | grep -E 'substrate_block_height|substrat
 ```
 You should see lines like `substrate_block_height{status="best"} 12345`.
 
-## Step 2 — Create a Slack channel + Incoming Webhook
+## Step 2 — Create two channels + two Incoming Webhooks
 
-1. In Slack, create two channels: **`#midnight-alerts`** (warnings) and
-   **`#midnight-critical`** (critical). *(Right-click Channels ▸ Create ▸ Create channel.)*
-2. Create an Incoming Webhook:
-   - Go to **https://api.slack.com/apps** ▸ **Create New App** ▸ *From scratch* ▸ name it
-     `midnight-alerts`, pick your workspace.
-   - In the app, open **Incoming Webhooks** ▸ toggle **Activate Incoming Webhooks** on.
-   - **Add New Webhook to Workspace** ▸ choose `#midnight-alerts` ▸ **Allow**.
-   - Copy the webhook URL (`https://hooks.slack.com/services/T…/B…/…`).
-3. (Optional) One webhook can only post to the channel it was created for. To post to both
-   channels, either create a second webhook for `#midnight-critical` and split the
-   `api_url_file` per receiver, or use one channel. This repo points both receivers at the
-   same secret file for simplicity — see the note in `alertmanager/alertmanager.yml`.
+### Why two channels?
 
-## Step 3 — Wire the webhook (one source of truth)
+Alerts are split by **urgency**, not lumped into one stream, so that a "node is down" page is
+never buried under low-priority noise:
 
-**Where the webhook lives — and the most secure option.** The single source of truth is **AWS
-Secrets Manager** (encrypted with the CMK, IAM-scoped, audited, rotatable) — this is the most
-secure place and what the Terraform stack uses. Alertmanager and the dependency-free
-`node_health_check.py` can't call Secrets Manager directly, so on the box the secret is
-**materialised once** to a local `0600` file (ideally on `tmpfs`) that both read. That file is a
-cache, never a second source; it's git-ignored.
+| | `#midnight-critical` | `#midnight-alerts` |
+|---|---|---|
+| Meaning | act **now** | review soon, less urgent |
+| Examples | node down, no peers, block height stalled | disk filling, finality lag, service restarted |
+| Routing (see `alertmanager.yml`) | `group_wait 10s`, `repeat 1h` | `group_wait 30s`, `repeat 4h` |
+| Intended audience | the channel on-call watches closely / pages from | a quieter channel you skim |
 
-**On the Terraform-provisioned box (recommended):**
+This is a deliberate **signal-over-noise** design: you get woken up only for things that
+warrant it, and warnings still land somewhere visible without drowning the critical stream.
+A single channel would also work for a solo lab — the trade-off is you lose that separation.
+
+### The webhooks
+
+A Slack Incoming Webhook is **bound to the one channel** it was created for (app-based webhooks
+can't override the channel in the payload). Two channels therefore need **two webhooks**.
+
+1. Create two channels: **`#midnight-alerts`** (warnings) and **`#midnight-critical`** (critical).
+2. Create an app once: **https://api.slack.com/apps** ▸ **Create New App** ▸ *From scratch* ▸
+   pick your workspace ▸ open **Incoming Webhooks** ▸ toggle it **On**.
+3. **Add New Webhook to Workspace** twice — once selecting `#midnight-alerts`, once selecting
+   `#midnight-critical`. Copy both URLs. (Keep them straight — that mapping is the whole point.)
+
+## Step 3 — Wire the two webhooks (Secrets Manager as source of truth)
+
+**Source of truth = AWS Secrets Manager** (CMK-encrypted, IAM-scoped, audited, rotatable). The
+Terraform stack stores both webhooks in **one** secret as JSON: `{"alerts": "...", "critical": "..."}`
+(set `slack_webhook_alerts` / `slack_webhook_critical`). Alertmanager and the dependency-free
+`node_health_check.py` can't call Secrets Manager directly, so materialise the webhooks to local
+`0600` files (ideally on `tmpfs`) — caches, never a second source; git-ignored.
+
+**Alertmanager** reads a **separate file per channel** (`api_url_file`), so each receiver posts to
+the right place:
+
+| Receiver | File (`secrets/`) | Channel |
+|---|---|---|
+| `slack-warnings` | `slack_alerts` | `#midnight-alerts` |
+| `slack-critical` | `slack_critical` | `#midnight-critical` |
+
+**On the Terraform-provisioned box** — split the one JSON secret into the two files:
 ```bash
-# Terraform stored the webhook in Secrets Manager; materialise it (also done by
-# scripts/setup_node.sh --slack-secret and the terraform user_data helper):
-aws secretsmanager get-secret-value --region ap-southeast-1 \
-  --secret-id midnight-validator-lab-preprod/slack-webhook \
-  --query SecretString --output text \
-  | sudo install -m600 /dev/stdin monitoring/alertmanager/secrets/slack_api_url
+S=$(aws secretsmanager get-secret-value --region ap-southeast-1 \
+      --secret-id midnight-validator-lab-preprod/slack-webhooks \
+      --query SecretString --output text)
+jq -rn --argjson s "$S" '$s.alerts'   | sudo install -m600 /dev/stdin monitoring/alertmanager/secrets/slack_alerts
+jq -rn --argjson s "$S" '$s.critical' | sudo install -m600 /dev/stdin monitoring/alertmanager/secrets/slack_critical
 ```
 
-**Standalone (no Secrets Manager):** paste the webhook straight into the git-ignored file:
+**Standalone (no Secrets Manager):** copy each example and paste the matching webhook:
 ```bash
-cd monitoring/alertmanager/secrets && cp slack_api_url.example slack_api_url
-# then paste your https://hooks.slack.com/services/… URL as the only line
+cd monitoring/alertmanager/secrets
+cp slack_alerts.example slack_alerts       # paste the #midnight-alerts webhook
+cp slack_critical.example slack_critical   # paste the #midnight-critical webhook
 ```
 
-Alertmanager reads `secrets/slack_api_url` via `api_url_file` (mounted into the container); the
-health checker reads the same secret via `--slack-webhook-file` (the box canonical path is
-`/etc/midnight/slack_webhook`, written by `setup_node.sh`/Terraform from the same SM secret).
-Only `slack_api_url.example` is committed. Adjust channel names in `alertmanager/alertmanager.yml`.
+**The health checker** (`node_health_check.py`) posts to a single channel — point it at the
+**critical** webhook via `--slack-webhook-file /etc/midnight/slack_webhook`. On the Terraform box,
+`setup_node.sh --slack-secret …/slack-webhooks` (and the user_data helper) writes that file from
+the secret's `.critical` field automatically. Only the `*.example` files are committed.
 
 > **Ranking (most → least secure):** Secrets Manager (KMS-encrypted, IAM, audit, rotation) →
 > `tmpfs` 0600 file materialised at runtime → on-disk 0600 file → env var → in config/argv
@@ -194,7 +215,7 @@ Optionally run it on a timer (unit files in `../scripts/README.md`).
 |---|---|
 | `midnight-node` target DOWN | node not started with `--prometheus-external`; `:9615` blocked |
 | Grafana panels empty | datasource not linked → check *Connections ▸ Data sources*; targets UP? |
-| No Slack message | `secrets/slack_api_url` missing/empty or wrong; `docker compose restart alertmanager`; check `docker logs alertmanager` |
+| No Slack message | `secrets/slack_alerts` or `secrets/slack_critical` missing/empty/wrong; `docker compose restart alertmanager`; check `docker logs alertmanager` |
 | Alerts never fire | rule `for:` window not elapsed; verify metric names exist in Prometheus |
 
 ---

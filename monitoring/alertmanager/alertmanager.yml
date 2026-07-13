@@ -1,15 +1,18 @@
 # Alertmanager routing → Slack.
 #
-# The Slack webhook URL is NOT stored here. It is read from a mounted secret file
-# (`api_url_file`) so no credential lands in version control. Source of truth = AWS Secrets
-# Manager; materialise it to secrets/slack_api_url (git-ignored), e.g.:
-#   aws secretsmanager get-secret-value --secret-id <slack-secret> --query SecretString \
-#     --output text | install -m600 /dev/stdin secrets/slack_api_url
-# Standalone (no SM): cp secrets/slack_api_url.example secrets/slack_api_url and paste the URL.
-# See monitoring/README.md ▸ "Wire the webhook".
+# Each Slack channel needs its OWN webhook (a webhook is bound to one channel). No URL is
+# stored here — each receiver reads its webhook from a mounted secret file (`api_url_file`):
+#   secrets/slack_alerts    -> #midnight-alerts   (warnings)
+#   secrets/slack_critical  -> #midnight-critical (critical)
+# Source of truth = one AWS Secrets Manager secret (JSON {alerts, critical}); materialise both:
+#   S=$(aws secretsmanager get-secret-value --secret-id <name>/slack-webhooks --query SecretString --output text)
+#   jq -rn --argjson s "$S" '$s.alerts'   | install -m600 /dev/stdin secrets/slack_alerts
+#   jq -rn --argjson s "$S" '$s.critical' | install -m600 /dev/stdin secrets/slack_critical
+# Standalone (no SM): cp each .example to its real name and paste the matching webhook.
+# See monitoring/README.md ▸ "Wire the webhooks".
 #
-# Critical alerts go to a dedicated #midnight-critical channel with a short group_wait
-# so they surface fast; warnings are batched into #midnight-alerts to reduce noise.
+# Critical alerts go to #midnight-critical with a short group_wait so they surface fast;
+# warnings are batched into #midnight-alerts to reduce noise.
 
 global:
   resolve_timeout: 5m
@@ -31,7 +34,7 @@ route:
 receivers:
   - name: slack-warnings
     slack_configs:
-      - api_url_file: /etc/alertmanager/secrets/slack_api_url
+      - api_url_file: /etc/alertmanager/secrets/slack_alerts
         channel: '#midnight-alerts'
         send_resolved: true
         color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
@@ -46,7 +49,7 @@ receivers:
 
   - name: slack-critical
     slack_configs:
-      - api_url_file: /etc/alertmanager/secrets/slack_api_url
+      - api_url_file: /etc/alertmanager/secrets/slack_critical
         channel: '#midnight-critical'
         send_resolved: true
         color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'

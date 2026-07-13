@@ -8,5 +8,5 @@ locals {
     Owner       = var.owner
   })
 
-  slack_enabled = var.slack_webhook_url != ""
+  slack_enabled = var.slack_webhook_alerts != "" || var.slack_webhook_critical != ""
 }

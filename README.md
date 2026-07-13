@@ -154,7 +154,7 @@ few dollars/month, prorated, and gone on `terraform destroy`.
 [`terraform/`](terraform/) builds the whole host in one step, with security defaults baked in
 so you don't wire them by hand:
 
-- Generated Postgres password + optional Slack webhook in **AWS Secrets Manager** (never in
+- Generated Postgres password + optional per-channel Slack webhooks in **AWS Secrets Manager** (never in
   code or committed state output); the instance reads them at runtime via a least-privilege
   IAM role.
 - **KMS CMK** (rotation on) encrypts the secrets and the **EBS** volume.

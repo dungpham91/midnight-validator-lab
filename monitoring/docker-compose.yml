@@ -33,7 +33,7 @@ services:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro   # holds slack_api_url (git-ignored)
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro   # holds slack_alerts / slack_critical (git-ignored)
     ports:
       - "9093:9093"
 

@@ -17,7 +17,7 @@ Stands up everything the node needs on EC2, with sensible security defaults bake
 - **EC2 instance** (`r6i.2xlarge` by default — 8 vCPU / 64 GiB, x86_64) running Ubuntu 24.04
 - **gp3 root volume** (640 GB, provisioned IOPS/throughput), **encrypted** with a customer KMS key
 - **KMS CMK** (rotation on) used for both secrets and the EBS volume
-- **Secrets Manager**: a generated Postgres password (and, optionally, your Slack webhook)
+- **Secrets Manager**: a generated Postgres password (and, optionally, your per-channel Slack webhooks)
 - **IAM instance role**: SSM access + least-privilege read of *only* those secrets and `kms:Decrypt`
 - **Security group**: P2P inbound only; RPC/metrics/Grafana stay closed
 - **user_data**: installs prerequisites and drops `/usr/local/bin/fetch-node-secrets.sh`

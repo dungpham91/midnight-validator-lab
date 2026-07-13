@@ -111,8 +111,17 @@ variable "ssh_public_key" {
 }
 
 # ── Secrets ───────────────────────────────────────────────────────────────────────────
-variable "slack_webhook_url" {
-  description = "Optional Slack webhook. If set, it is stored in Secrets Manager (never in plaintext state output)."
+# Slack Incoming Webhooks are bound to one channel each, so a two-channel setup needs two
+# webhooks. Both are stored together in one Secrets Manager secret (JSON: {alerts, critical}).
+variable "slack_webhook_alerts" {
+  description = "Slack webhook for the warnings channel (#midnight-alerts). Stored in Secrets Manager if set."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "slack_webhook_critical" {
+  description = "Slack webhook for the critical channel (#midnight-critical). Stored in Secrets Manager if set."
   type        = string
   default     = ""
   sensitive   = true

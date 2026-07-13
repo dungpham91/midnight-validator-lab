@@ -165,15 +165,17 @@ function stage_secrets() {
     fi
     log_debug "Postgres password resolved (${#DB_PASS} chars)"
 
-    # Slack webhook: Secrets Manager is the single source of truth; materialise it to one
-    # 0600 file that both Alertmanager and node_health_check.py consume.
+    # Slack: the SM secret is JSON {alerts, critical} (one webhook per channel). The health
+    # checker posts to a single channel, so materialise the CRITICAL webhook for it. Alertmanager
+    # reads its own two files (see monitoring/README.md).
     if [[ -n "${slack_secret}" ]]; then
-        log_info "materialising Slack webhook from Secrets Manager to /etc/midnight/slack_webhook"
+        log_info "materialising the critical Slack webhook to /etc/midnight/slack_webhook (node_health_check.py)"
         if ! is_dry_run; then
             require_cmd aws
+            require_cmd jq
             install -d -m 700 /etc/midnight
             aws secretsmanager get-secret-value --region "${region}" --secret-id "${slack_secret}" \
-                --query SecretString --output text > /etc/midnight/slack_webhook
+                --query SecretString --output text | jq -r '.critical // empty' > /etc/midnight/slack_webhook
             chmod 600 /etc/midnight/slack_webhook
         fi
     fi
@@ -516,8 +518,8 @@ Options:
                        $(IFS=' '; echo "${ALL_STAGES[*]}")
   --db-secret NAME     AWS Secrets Manager secret with {"password": ...} (preferred)
   --db-password-file F Read the Postgres password from a file instead
-  --slack-secret NAME  Secrets Manager id for the Slack webhook; materialised to
-                       /etc/midnight/slack_webhook (0600) for Alertmanager + the health checker
+  --slack-secret NAME  Secrets Manager id of the {alerts,critical} webhooks JSON; the critical
+                       webhook is materialised to /etc/midnight/slack_webhook (0600) for the health checker
   --region REGION      AWS region for Secrets Manager (default: ${region})
   --user USER          Service user (default: ${node_user})
   --network NET        Midnight network (default: ${network})

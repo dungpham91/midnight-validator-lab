@@ -18,5 +18,7 @@ allow_p2p_inbound = true
 # ssh_allowed_cidr = "203.0.113.4/32"
 # ssh_public_key   = "ssh-ed25519 AAAA... you@host"
 
-# Optional: store your Slack webhook in Secrets Manager (marked sensitive).
-# slack_webhook_url = "https://hooks.slack.com/services/T.../B.../..."
+# Optional: one Slack webhook per channel (Slack binds a webhook to a single channel).
+# Both are stored together in one Secrets Manager secret (JSON {alerts, critical}).
+# slack_webhook_alerts   = "https://hooks.slack.com/services/AAA/BBB/alerts-hook"
+# slack_webhook_critical = "https://hooks.slack.com/services/CCC/DDD/critical-hook"

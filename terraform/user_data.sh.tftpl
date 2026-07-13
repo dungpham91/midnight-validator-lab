@@ -47,11 +47,12 @@ if command -v psql >/dev/null 2>&1; then
     || sudo -u postgres psql -c "CREATE DATABASE cexplorer;"
 fi
 
-# Optional Slack webhook for scripts/node_health_check.py
+# Slack webhook for scripts/node_health_check.py. The secret is JSON {alerts, critical};
+# the health checker posts to a single channel, so use the critical webhook.
 if [ -n "$SLACK_SECRET" ]; then
   install -d -m 700 /etc/midnight
   aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SLACK_SECRET" \
-    --query SecretString --output text > /etc/midnight/slack_webhook
+    --query SecretString --output text | jq -r '.critical // empty' > /etc/midnight/slack_webhook
   chmod 600 /etc/midnight/slack_webhook
 fi
 
