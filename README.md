@@ -128,8 +128,8 @@ This guide was written and tested against the host below. Any equivalent machine
 
 Singapore gp3 rates: $0.096/GB-mo, $0.006/provisioned-IOPS-mo, $0.048/MB/s-mo. (us-east-1 is
 `~20% cheaper` — `r6i.2xlarge` $0.504/hr, gp3 $0.08/GB-mo — if latency to your region allows it.)
-Not in the table (small, but real): the Terraform stack also adds KMS (~$1/mo), Secrets
-Manager (~$0.40/secret/mo), CloudWatch detailed monitoring, and VPC flow-log ingestion — a
+Not in the table (small, but real): the Terraform stack also adds KMS (`~$1/mo`), Secrets
+Manager (`~$0.40/secret/mo`), CloudWatch detailed monitoring, and VPC flow-log ingestion — a
 few dollars/month, prorated, and gone on `terraform destroy`.
 
 **Full run (~1.5 days):** ≈ **$25** with baseline gp3, ≈ **$28** with provisioned gp3
