@@ -1,0 +1,59 @@
+# ─── Secrets & keys — NEVER commit ──────────────────────────────────────────────
+.env
+*.env
+aura.json
+grandpa.json
+cross_chain.json
+partner-chains-public-keys.json
+secret_ed25519
+*_ed25519
+secretPhrase*
+*.privatekey
+privatekey
+publickey
+*.pgpass
+.pgpass
+wg0.conf
+*.key
+*.pem
+
+# Alertmanager Slack webhook (real file kept out of VCS; .example IS committed)
+monitoring/alertmanager/secrets/slack_api_url
+!monitoring/alertmanager/secrets/slack_api_url.example
+
+# ─── Script output ──────────────────────────────────────────────────────────────
+health-reports/
+*.local.json
+
+# ─── Monitoring runtime data ────────────────────────────────────────────────────
+grafana-data/
+prometheus-data/
+
+# ─── Terraform ────────────────────────────────────────────────────────────────
+# State can contain the generated DB password — never commit it.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfstate.d/
+terraform/*.tfvars
+!terraform/*.tfvars.example
+terraform/crash.log
+terraform/crash.*.log
+terraform/.terraform.lock.hcl
+
+# ─── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# ─── OS / editor ────────────────────────────────────────────────────────────────
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# NOTE: evidence/ IS committed (logs/screenshots proving block progression).
+# Scrub any secrets from evidence before committing.

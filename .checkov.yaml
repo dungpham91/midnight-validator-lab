@@ -1,0 +1,12 @@
+# Checkov configuration for midnight-validator-lab.
+#
+# Real IaC findings are fixed inline in terraform/. The suppressions below are documented,
+# accepted decisions — not silent ignores. Terraform-specific skips (CKV_AWS_88,
+# CKV2_AWS_57, CKV2_AWS_5) live as inline `#checkov:skip=` comments next to the resource.
+
+skip-check:
+  # RUNBOOK.md's .env / connection-string examples use placeholders (YOUR_POSTGRES_PASSWORD),
+  # not real credentials. Dedicated secret scanning is done by gitleaks in CI (see
+  # .github/workflows/ci.yml) — the authoritative secret gate — so this checkov sub-check is
+  # disabled to avoid false positives on documented placeholders.
+  - CKV_SECRET_4

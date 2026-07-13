@@ -1,0 +1,66 @@
+# Alertmanager routing → Slack.
+#
+# The Slack webhook URL is NOT stored here. It is read from a mounted secret file
+# (`api_url_file`) so no credential lands in version control. Source of truth = AWS Secrets
+# Manager; materialise it to secrets/slack_api_url (git-ignored), e.g.:
+#   aws secretsmanager get-secret-value --secret-id <slack-secret> --query SecretString \
+#     --output text | install -m600 /dev/stdin secrets/slack_api_url
+# Standalone (no SM): cp secrets/slack_api_url.example secrets/slack_api_url and paste the URL.
+# See monitoring/README.md ▸ "Wire the webhook".
+#
+# Critical alerts go to a dedicated #midnight-critical channel with a short group_wait
+# so they surface fast; warnings are batched into #midnight-alerts to reduce noise.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: slack-warnings
+  group_by: ['alertname', 'instance']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="critical"']
+      receiver: slack-critical
+      group_wait: 10s
+      repeat_interval: 1h
+    - matchers: ['severity="warning"']
+      receiver: slack-warnings
+
+receivers:
+  - name: slack-warnings
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_api_url
+        channel: '#midnight-alerts'
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+        title: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}'
+        text: |-
+          {{ range .Alerts -}}
+          *Severity:* {{ .Labels.severity }}  |  *Instance:* {{ .Labels.instance }}
+          *Summary:* {{ .Annotations.summary }}
+          *Detail:* {{ .Annotations.description }}
+          {{ if .Annotations.runbook }}*Runbook:* {{ .Annotations.runbook }}{{ end }}
+          {{ end }}
+
+  - name: slack-critical
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_api_url
+        channel: '#midnight-critical'
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        title: ':rotating_light: [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: |-
+          {{ range .Alerts -}}
+          *Severity:* {{ .Labels.severity }}  |  *Instance:* {{ .Labels.instance }}
+          *Summary:* {{ .Annotations.summary }}
+          *Detail:* {{ .Annotations.description }}
+          {{ if .Annotations.runbook }}*Runbook:* {{ .Annotations.runbook }}{{ end }}
+          {{ end }}
+
+inhibit_rules:
+  # If the node is DOWN, suppress the noisier stalled/no-peers alerts for the same host.
+  - source_matchers: ['alertname="MidnightNodeDown"']
+    target_matchers: ['severity=~"warning|critical"']
+    equal: ['instance']

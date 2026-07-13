@@ -1,0 +1,26 @@
+# Tiny, cheap box to dry-run / validate the setup script BEFORE paying for the full node.
+# Run it in a dedicated Terraform WORKSPACE so its state is isolated from the real host
+# (environment = "test" also keeps the AWS resource names distinct):
+#
+#   cp test.tfvars.example test.tfvars      # test.tfvars is git-ignored
+#   terraform workspace new test
+#   terraform apply -var-file=test.tfvars
+#   eval "$(terraform output -raw ssm_start_session)"
+#   # on the box: sudo scripts/setup_node.sh --dry-run   (or test individual stages)
+#   terraform destroy -var-file=test.tfvars
+#   terraform workspace select default
+#
+# NOTE: 1 GiB RAM is only enough to exercise the SCRIPT (logging, args, prereqs, flow) — it
+# cannot run a real Cardano DB Sync. Use the full spec for an actual node.
+
+region                 = "ap-southeast-1" # Singapore
+project                = "midnight-validator-lab"
+environment            = "test"
+owner                  = "you@example.com"
+
+instance_type          = "t3.micro" # 2 vCPU / 1 GiB (use "t2.micro" for exactly 1 vCPU / 1 GiB)
+root_volume_size_gb    = 20
+root_volume_iops       = 3000 # free baseline
+root_volume_throughput = 125  # free baseline
+
+allow_p2p_inbound = false # not needed to test the script

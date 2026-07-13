@@ -1,0 +1,136 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "Block Production",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Best Block",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [ { "refId": "A", "expr": "substrate_block_height{job=\"midnight-node\",status=\"best\"}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "type": "stat",
+      "title": "Finalized Block",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [ { "refId": "A", "expr": "substrate_block_height{job=\"midnight-node\",status=\"finalized\"}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Block import rate (blocks/s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 },
+      "id": 3,
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [ { "refId": "A", "expr": "deriv(substrate_block_height{job=\"midnight-node\",status=\"best\"}[5m])", "legendFormat": "best", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "type": "row",
+      "title": "Network",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "id": 101,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Peer count",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "id": 4,
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 1 }, { "color": "green", "value": 3 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+      "targets": [ { "refId": "A", "expr": "substrate_sub_libp2p_peers_count{job=\"midnight-node\"}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Peers over time",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 12, "x": 6, "y": 8 },
+      "id": 5,
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [ { "refId": "A", "expr": "substrate_sub_libp2p_peers_count{job=\"midnight-node\"}", "legendFormat": "peers", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "type": "stat",
+      "title": "Node up",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 8 },
+      "id": 6,
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ], "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "targets": [ { "refId": "A", "expr": "up{job=\"midnight-node\"}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "type": "row",
+      "title": "Host Resources",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 102,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU usage %",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 15 },
+      "id": 7,
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "fillOpacity": 10 }, "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [ { "refId": "A", "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "{{instance}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory used %",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 15 },
+      "id": 8,
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "fillOpacity": 10 }, "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [ { "refId": "A", "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100", "legendFormat": "{{instance}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Root disk used %",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 15 },
+      "id": 9,
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "fillOpacity": 10 }, "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [ { "refId": "A", "expr": "(1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"}) * 100", "legendFormat": "{{instance}}", "datasource": { "type": "prometheus", "uid": "prometheus" } } ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["midnight", "preprod", "validator"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Midnight FNO — Pre-Prod Node",
+  "uid": "midnight-fno-preprod",
+  "version": 1,
+  "weekStart": ""
+}

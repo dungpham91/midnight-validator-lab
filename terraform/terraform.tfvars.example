@@ -1,0 +1,22 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is git-ignored.
+
+region                 = "ap-southeast-1" # Singapore
+project                = "midnight-validator-lab"
+environment            = "preprod"
+owner                  = "you@example.com"
+
+instance_type          = "r6i.2xlarge" # 8 vCPU / 64 GiB, x86_64
+root_volume_size_gb    = 640
+root_volume_iops       = 10000
+root_volume_throughput = 250
+
+allow_p2p_inbound = true
+
+# Access is via SSM Session Manager by default (no SSH port open).
+# To use SSH instead, uncomment and restrict the CIDR to your IP:
+# ssh_enabled      = true
+# ssh_allowed_cidr = "203.0.113.4/32"
+# ssh_public_key   = "ssh-ed25519 AAAA... you@host"
+
+# Optional: store your Slack webhook in Secrets Manager (marked sensitive).
+# slack_webhook_url = "https://hooks.slack.com/services/T.../B.../..."

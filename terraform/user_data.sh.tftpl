@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Bootstrap: prerequisites + a re-runnable secret-fetch helper.
+# NOTE: no `set -x` here — it would leak the DB password into cloud-init logs.
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update -y
+apt-get install -y curl wget jq unzip gnupg ca-certificates pv build-essential pkg-config
+
+# AWS CLI v2 (used to read secrets via the instance role)
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+fi
+
+# Dedicated non-login service user
+id -u midnight >/dev/null 2>&1 || adduser --disabled-password --gecos "" midnight
+
+# ── Re-runnable secret-fetch helper ───────────────────────────────────────────────────
+# Values are baked in by Terraform at apply time. It pulls the Postgres password (and Slack
+# webhook if configured) from Secrets Manager and writes them with strict permissions.
+cat > /usr/local/bin/fetch-node-secrets.sh <<'HELPER'
+#!/usr/bin/env bash
+set -euo pipefail
+REGION="${region}"
+DB_SECRET="${db_secret_name}"
+SLACK_SECRET="${slack_secret_name}"
+MID_HOME=/home/midnight
+
+DB_JSON=$(aws secretsmanager get-secret-value --region "$REGION" --secret-id "$DB_SECRET" --query SecretString --output text)
+DB_PASS=$(printf '%s' "$DB_JSON" | jq -r .password)
+
+# .pgpass with both the Unix-socket and localhost/TCP entries (0600)
+umask 077
+printf '%s\n%s\n' \
+  "/var/run/postgresql:5432:cexplorer:midnight:$DB_PASS" \
+  "localhost:5432:cexplorer:midnight:$DB_PASS" > "$MID_HOME/.pgpass"
+chown midnight:midnight "$MID_HOME/.pgpass"
+chmod 600 "$MID_HOME/.pgpass"
+
+# If Postgres is installed, ensure the role and database exist (idempotent)
+if command -v psql >/dev/null 2>&1; then
+  sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='midnight'" | grep -q 1 \
+    || sudo -u postgres psql -c "CREATE USER midnight WITH PASSWORD '$DB_PASS'; ALTER ROLE midnight WITH SUPERUSER CREATEDB;"
+  sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='cexplorer'" | grep -q 1 \
+    || sudo -u postgres psql -c "CREATE DATABASE cexplorer;"
+fi
+
+# Optional Slack webhook for scripts/node_health_check.py
+if [ -n "$SLACK_SECRET" ]; then
+  install -d -m 700 /etc/midnight
+  aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SLACK_SECRET" \
+    --query SecretString --output text > /etc/midnight/slack_webhook
+  chmod 600 /etc/midnight/slack_webhook
+fi
+
+echo "fetch-node-secrets: done"
+HELPER
+chmod 755 /usr/local/bin/fetch-node-secrets.sh
+
+# First run (Postgres not installed yet, so role/db steps are skipped gracefully).
+/usr/local/bin/fetch-node-secrets.sh || true

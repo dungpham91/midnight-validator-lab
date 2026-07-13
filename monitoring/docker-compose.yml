@@ -1,0 +1,70 @@
+# Local monitoring stack for a Midnight pre-prod FNO.
+#
+#   docker compose up -d
+#   Grafana  → http://localhost:3000  (admin / admin on first login)
+#   Prometheus → http://localhost:9090
+#
+# Assumes the Midnight node exposes Substrate metrics on the host at :9615 and that
+# node_exporter runs on the node host. `host.docker.internal` lets containers reach the
+# host; on Linux the extra_hosts mapping below wires it to the docker bridge gateway.
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  alertmanager:
+    image: prom/alertmanager:v0.33.1
+    container_name: alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro   # holds slack_api_url (git-ignored)
+    ports:
+      - "9093:9093"
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.0
+    container_name: node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "9100:9100"
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:

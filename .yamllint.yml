@@ -1,0 +1,19 @@
+# Lenient yamllint config: fail only on real problems, not stylistic noise.
+extends: default
+
+rules:
+  line-length: disable
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  truthy:
+    # GitHub Actions uses `on:` as a key — don't flag it.
+    check-keys: false
+  braces:
+    max-spaces-inside: 1
+  brackets:
+    max-spaces-inside: 1
+
+ignore: |
+  terraform/.terraform/

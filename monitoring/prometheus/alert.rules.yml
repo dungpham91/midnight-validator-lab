@@ -1,0 +1,127 @@
+# Alert rules for a Midnight pre-prod FNO validator.
+#
+# Design principle: signal over noise. Every alert is (a) actionable, (b) has a `for:`
+# window so a single flaky scrape does not page, and (c) maps to a documented response
+# in monitoring/README.md. The three CORE alerts are the ones that tell you the node is
+# not doing its one job — being a healthy, connected, block-progressing validator.
+
+groups:
+  # ── CORE: the three that matter most for a validator ────────────────────────────
+  - name: midnight-core
+    rules:
+      # 1) Process crash / service restart — node is not being scraped at all.
+      - alert: MidnightNodeDown
+        expr: up{job="midnight-node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Midnight node is DOWN ({{ $labels.instance }})"
+          description: >
+            Prometheus cannot scrape the Midnight node for >2m. The process has crashed,
+            the service restarted, or the metrics port is unreachable.
+          runbook: "monitoring/README.md#1-midnightnodedown"
+
+      # 2) Block progression stalled — best block height not moving.
+      #    A validator that is not importing blocks is effectively offline even if the
+      #    process is up. `changes()==0` over 10m means the height gauge never moved.
+      - alert: MidnightBlockProgressionStalled
+        # The 10m changes() window already debounces flaps, so no extra `for:` is needed;
+        # this keeps the fire time at ~10m, matching the docs.
+        expr: changes(substrate_block_height{job="midnight-node",status="best"}[10m]) == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Best block height stalled ({{ $labels.instance }})"
+          description: >
+            substrate_block_height{status="best"} has not advanced in 10m. The node has
+            stopped importing/producing blocks (stuck sync, lost peers, or DB stall).
+          runbook: "monitoring/README.md#2-midnightblockprogressionstalled"
+
+      # 3) Low peer count — network isolation risk.
+      - alert: MidnightLowPeerCount
+        expr: substrate_sub_libp2p_peers_count{job="midnight-node"} < 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low peer count: {{ $value }} ({{ $labels.instance }})"
+          description: >
+            Fewer than 3 peers for 10m. The node risks isolation and falling behind the
+            chain tip. Check P2P port 6000 and outbound connectivity.
+          runbook: "monitoring/README.md#3-midnightlowpeercount"
+
+      # 3b) Hard escalation of the above: zero peers is critical, faster.
+      - alert: MidnightNoPeers
+        expr: substrate_sub_libp2p_peers_count{job="midnight-node"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node has ZERO peers ({{ $labels.instance }})"
+          description: "No peers for 5m — the node is isolated from the network."
+          runbook: "monitoring/README.md#3-midnightlowpeercount"
+
+  # ── SUPPORTING: finality, restarts, host resources ──────────────────────────────
+  - name: midnight-supporting
+    rules:
+      # Finality lagging — best block moves but finalized does not.
+      - alert: MidnightFinalityStalled
+        expr: changes(substrate_block_height{job="midnight-node",status="finalized"}[15m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Finalized height not advancing ({{ $labels.instance }})"
+          description: >
+            Finalized block height unchanged for 15m while the chain should be finalizing.
+            Possible GRANDPA issue or the node is far behind the tip.
+
+      # Node restarted recently (crash loop / OOM / manual restart).
+      - alert: MidnightNodeRecentlyRestarted
+        expr: changes(substrate_process_start_time_seconds{job="midnight-node"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Midnight node restarted ({{ $labels.instance }})"
+          description: "Process start time changed in the last 15m — investigate why it restarted."
+
+  - name: host-resources
+    rules:
+      - alert: HostHighCpu
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU >85% ({{ $labels.instance }})"
+          description: "Sustained CPU pressure can slow block import and db-sync."
+
+      - alert: HostHighMemory
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory >90% ({{ $labels.instance }})"
+          description: "Risk of OOM-kill of the node or Postgres."
+
+      - alert: HostDiskFillingUp
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}) * 100 > 85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk >85% full ({{ $labels.instance }})"
+          description: "Cardano DB + Postgres grow continuously. Free space or resize."
+
+      # Predictive: will root run out of space within 24h at current rate?
+      - alert: HostDiskWillFillIn24h
+        expr: predict_linear(node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"}[6h], 24*3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Root disk projected to fill within 24h ({{ $labels.instance }})"
+          description: "Act before db-sync/Postgres halt on a full disk."

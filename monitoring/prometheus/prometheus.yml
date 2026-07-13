@@ -1,0 +1,52 @@
+# Prometheus scrape + alerting config for a Midnight pre-prod FNO.
+#
+# The Midnight node is a Substrate-based node: with `--prometheus-external` it exposes
+# metrics on :9615 (metric names prefixed `substrate_`). node-exporter provides host
+# metrics. cardano-node/postgres exporters are optional (see commented jobs).
+#
+# Adjust the `targets` hosts if Prometheus runs on a different box than the node.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    network: preprod
+    role: fno-validator
+
+rule_files:
+  - /etc/prometheus/alert.rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Midnight (Substrate) node metrics. Start the node with:
+  #   midnight-node ... --prometheus-external --prometheus-port 9615
+  - job_name: midnight-node
+    static_configs:
+      - targets: ['host.docker.internal:9615']
+        labels:
+          instance: midnight-preprod-01
+
+  # Host CPU/RAM/disk. Run node_exporter on the node host (:9100).
+  - job_name: node-exporter
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          instance: midnight-preprod-01
+
+  # --- Optional: cardano-node EKG/Prometheus (enable hasPrometheus in config.json) ---
+  # - job_name: cardano-node
+  #   static_configs:
+  #     - targets: ['host.docker.internal:12798']
+
+  # --- Optional: postgres_exporter to watch the cexplorer DB / db-sync lag ---
+  # - job_name: postgres
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
