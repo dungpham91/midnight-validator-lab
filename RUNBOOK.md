@@ -319,9 +319,14 @@ mkdir -p ~/tmp && cd ~/tmp
 curl -L -O https://github.com/IntersectMBO/cardano-db-sync/releases/download/13.6.0.5/cardano-db-sync-13.6.0.5-linux.tar.gz
 tar -xzf cardano-db-sync-13.6.0.5-linux.tar.gz
 
-cp bin/* ~/.local/bin/
+# The tarball ships bin/ and schema/ read-only (0555). Use `cp -f` so a re-run can replace the
+# read-only binaries in place, and `cp -a` (not `mv`) for schema: moving a directory to a new
+# parent needs write on the dir itself (to rewrite its `..`), which 0555 denies to a non-root
+# user. Restore write afterwards so the dir stays idempotently removable.
+cp -f bin/* ~/.local/bin/
 mkdir -p ~/cardano-data/
-sudo mv ~/tmp/schema ~/cardano-data/
+cp -a ~/tmp/schema ~/cardano-data/
+chmod -R u+w ~/cardano-data/schema
 
 cd ~/cardano-data
 curl -O https://book.world.dev.cardano.org/environments/$NETWORK/db-sync-config.json
