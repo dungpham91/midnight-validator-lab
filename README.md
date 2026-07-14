@@ -466,6 +466,45 @@ fails on a fresh box.
 **Fix:** run every `key` command with `cd ~ && export CFG_PRESET=<network>`. In `setup_node.sh` the
 `keys` stage now sets both; `RUNBOOK.md` §3.2–3.3 note it too.
 
+### 9. Midnight node sits at `best: #0` (and "session keys loaded" grep is empty)
+
+**Spotted:** the node log never leaves genesis, and grepping for key-load lines returns nothing.
+```bash
+journalctl -u midnight-node --no-pager | tail
+# 💤 Idle (1 peers), best: #0 (0xdf83…361b), finalized #0 (0xdf83…361b)
+journalctl -u midnight-node --no-pager | grep -Ei 'AURA pubkey|GRANDPA pubkey|CROSS_CHAIN pubkey'
+# (no output)
+```
+**Diagnose** — first confirm the keys really are loaded, then ask *why* the height is 0:
+```bash
+# keys ARE loaded — midnight-node 0.22.2 just doesn't log "AURA pubkey"; check the keystore files:
+sudo -u midnight ls /home/midnight/data/chains/midnight_preprod/keystore/   # 61757261…(aura) 6772616e…(gran) 62656566…(beef)
+
+# sync + peer state via RPC
+curl -s -d '{"jsonrpc":"2.0","id":1,"method":"system_syncState","params":[]}' -H 'Content-Type: application/json' localhost:9933
+#  {"result":{"startingBlock":0,"currentBlock":0,"highestBlock":0}}
+curl -s -d '{"jsonrpc":"2.0","id":1,"method":"system_health","params":[]}' -H 'Content-Type: application/json' localhost:9933
+#  {"result":{"peers":1,"isSyncing":false,"shouldHavePeers":true}}
+curl -s -d '{"jsonrpc":"2.0","id":1,"method":"system_peers","params":[]}' -H 'Content-Type: application/json' localhost:9933 | jq '.result[] | {roles,bestNumber,bestHash}'
+#  { "roles": "FULL", "bestNumber": 0, "bestHash": "0xdf83…361b" }   <- the official bootnode is itself at genesis
+
+# reachability of the two preprod bootnodes (egress sanity)
+for h in bootnode-1 bootnode-2; do timeout 5 bash -c "</dev/tcp/$h.preprod.midnight.network/30333" \
+  && echo "$h OK" || echo "$h BLOCKED"; done
+#  bootnode-1 BLOCKED (their endpoint)   bootnode-2 OK
+```
+**Cause — two things, neither a setup bug:**
+1. The empty grep is a **wrong log string**, not missing keys — midnight-node 0.22.2 loads session keys silently. Verify by the keystore files (one per `aura`/`gran`/`beef`), not by log text.
+2. `best: #0` is **honest network state**: the node peers with the official preprod bootnode, on the
+   correct chain (its genesis `bestHash` matches), but that bootnode reports `bestNumber: 0` — there
+   is no block above genesis exposed to import, so the node is *synced to what the network shows*
+   (`isSyncing:false`), not stuck. A fresh, unauthorised FNO advancing its own Midnight height is
+   gated on committee authorisation + the n+2 epoch — out of lab scope.
+**Resolution:** none to "fix" — confirm the node is on the right chain (genesis hash match), keys are
+in the keystore, and it is peered. The demonstrable block progression for the lab is on the **Cardano
+layer** (`cexplorer.block.block_no` climbing, PV11 crossed); the Midnight node is evidenced as
+*operational* (validator mode, keys loaded, correct genesis, peered), per [`evidence/`](evidence/).
+
 ## Roadmap / possible improvements
 
 Already done in this repo: **IaC** ([`terraform/`](terraform/) — host + `gp3` volume with

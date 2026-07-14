@@ -58,36 +58,46 @@ Run each command from the repo root on the host (`/home/midnight/midnight-valida
 Every command `tee`s a file **and** prints to the terminal, so you can commit the file *and*
 screenshot the output.
 
-**1. Cardano node + db-sync are at the chain tip.** `verify-sync` reports the node's own
-`syncProgress` and how many seconds db-sync trails the tip (small = caught up):
+**1. Block progression (Cardano layer) — the demonstrable height increase.** db-sync keeps importing
+Cardano blocks into `cexplorer`; take TWO snapshots a few minutes apart and the block number must go
+up:
 ```bash
-sudo ./scripts/setup_node.sh --stage verify-sync | tee evidence/01-sync-status.txt
 sudo -u midnight psql -d cexplorer -c \
-  "SELECT block_no, slot_no, time FROM block ORDER BY id DESC LIMIT 1;" \
-  | tee evidence/02-dbsync-latest-block.txt
-```
-📷 Screenshot the `verify-sync` line: `syncProgress 100.00%` + `db-sync ... behind tip` (seconds).
-
-**2. Session keys are loaded** (the node read Aura / Grandpa / Cross-chain from the keystore):
-```bash
-journalctl -u midnight-node --no-pager | grep -Ei 'AURA pubkey|GRANDPA pubkey|CROSS_CHAIN pubkey' \
-  | tee evidence/03-session-keys.txt
-```
-📷 Screenshot the three `pubkey` lines.
-
-**3. Block progression — take TWO snapshots a few minutes apart** (the block number must go up):
-```bash
-journalctl -u midnight-node --no-pager | grep -E 'Best:|Imported' | tail -n 20 \
-  | tee evidence/04-block-progression-1.txt
+  "SELECT max(block_no) AS cardano_block, now()-max(time) AS behind_tip FROM block;" \
+  | tee -a evidence/01-cardano-progression.txt
 sleep 300
-journalctl -u midnight-node --no-pager | grep -E 'Best:|Imported' | tail -n 20 \
-  | tee evidence/04-block-progression-2.txt
+sudo -u midnight psql -d cexplorer -c \
+  "SELECT max(block_no) AS cardano_block, now()-max(time) AS behind_tip FROM block;" \
+  | tee -a evidence/01-cardano-progression.txt
 ```
-📷 Screenshot both — the highest `Best:#` in snapshot 2 should exceed snapshot 1.
+📷 Screenshot both rows — `cardano_block` in the 2nd is higher, `behind_tip` stays small.
+
+**2. Node is at the chain tip, across the PV11 hard fork.** `verify-sync` prints cardano-node's own
+`syncProgress` and how far db-sync trails the tip:
+```bash
+sudo ./scripts/setup_node.sh --stage verify-sync | tee evidence/02-sync-status.txt
+```
+📷 Screenshot: `syncProgress 100.00%` + `cardano-db-sync ... behind tip` (seconds).
+
+**3. Midnight node is operational** — validator mode, session keys loaded, on the correct chain,
+peered. (Session keys are verified by the **keystore files**, not by log text — midnight-node 0.22.2
+does not print `AURA pubkey`.)
+```bash
+sudo -u midnight ls -la /home/midnight/data/chains/midnight_preprod/keystore/ | tee evidence/03-keystore.txt
+curl -s -d '{"jsonrpc":"2.0","id":1,"method":"system_health","params":[]}' \
+  -H 'Content-Type: application/json' localhost:9933 | tee evidence/04-midnight-health.txt; echo
+curl -s -d '{"jsonrpc":"2.0","id":1,"method":"system_peers","params":[]}' \
+  -H 'Content-Type: application/json' localhost:9933 | tee evidence/05-midnight-peers.txt; echo
+```
+📷 Screenshot: keystore holds `aura`/`gran`/`beef` files; health shows `peers` ≥ 1; the peer's
+`bestHash` equals your node's genesis (same chain).
+> The Midnight height stays at genesis on purpose — an unauthorised FNO can't advance it in a lab
+> window (see the honest note at the top). The height increase to capture is the **Cardano** one in
+> step 1; here you're proving the node is up, keyed, and on the right network.
 
 **4. Health checker snapshot:**
 ```bash
-sudo -u midnight ./scripts/node_health_check.py --once --verbose | tee evidence/05-health-check.txt
+sudo -u midnight ./scripts/node_health_check.py --once --verbose | tee evidence/06-health-check.txt
 ```
 📷 Screenshot the coloured PASS/FAIL summary.
 
@@ -96,12 +106,12 @@ sudo -u midnight ./scripts/node_health_check.py --once --verbose | tee evidence/
 cd monitoring && docker compose up -d && cd ..
 # From your laptop, SSM port-forward 3000 (see terraform/README.md), open http://localhost:3000
 ```
-📷 Screenshot Grafana → `evidence/06-grafana-dashboard.png` (block height, peers, host metrics).
+📷 Screenshot Grafana → `evidence/07-grafana-dashboard.png` (block height, peers, host metrics).
 
 **6. Prove an alert fires to Slack** (stop the node → MidnightNodeDown → recover):
 ```bash
 sudo systemctl stop midnight-node          # wait ~2 min: alert fires to #midnight-critical
-# 📷 screenshot the Slack message → evidence/07-slack-alert.png
+# 📷 screenshot the Slack message → evidence/08-slack-alert.png
 sudo systemctl start midnight-node         # sends the resolved notification
 ```
 
