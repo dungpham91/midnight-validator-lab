@@ -100,8 +100,11 @@ the right place:
 S=$(aws secretsmanager get-secret-value --region ap-southeast-1 \
       --secret-id midnight-validator-lab-preprod/slack-webhooks \
       --query SecretString --output text)
-jq -rn --argjson s "$S" '$s.alerts'   | sudo install -m600 /dev/stdin monitoring/alertmanager/secrets/slack_alerts
-jq -rn --argjson s "$S" '$s.critical' | sudo install -m600 /dev/stdin monitoring/alertmanager/secrets/slack_critical
+# NOTE mode: the prom/alertmanager container runs as `nobody` (uid 65534), so root-owned 0600 files
+# give it "permission denied". Use 0644 (readable by the container) for a single-admin lab box; for a
+# tighter setup, `chown 65534:65534` the files and keep 0600. The dir must also be traversable (0755).
+jq -rn --argjson s "$S" '$s.alerts'   | sudo install -m644 /dev/stdin monitoring/alertmanager/secrets/slack_alerts
+jq -rn --argjson s "$S" '$s.critical' | sudo install -m644 /dev/stdin monitoring/alertmanager/secrets/slack_critical
 ```
 
 **Standalone (no Secrets Manager):** copy each example and paste the matching webhook:
@@ -215,7 +218,7 @@ Optionally run it on a timer (unit files in `../scripts/README.md`).
 |---|---|
 | `midnight-node` target DOWN | node not started with `--prometheus-external`; `:9615` blocked |
 | Grafana panels empty | datasource not linked → check *Connections ▸ Data sources*; targets UP? |
-| No Slack message | `secrets/slack_alerts` or `secrets/slack_critical` missing/empty/wrong; `docker compose restart alertmanager`; check `docker logs alertmanager` |
+| No Slack message | check `docker logs alertmanager` for the receiver error: **`permission denied`** on `secrets/slack_*` → the container (`nobody`/65534) can't read root-owned `0600` files → `chmod 644` the files + `755` the dir; or missing/empty/wrong webhook; then `docker compose restart alertmanager` |
 | Alerts never fire | rule `for:` window not elapsed; verify metric names exist in Prometheus |
 
 ---

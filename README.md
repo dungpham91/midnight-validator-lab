@@ -505,6 +505,30 @@ in the keystore, and it is peered. The demonstrable block progression for the la
 layer** (`cexplorer.block.block_no` climbing, PV11 crossed); the Midnight node is evidenced as
 *operational* (validator mode, keys loaded, correct genesis, peered), per [`evidence/`](evidence/).
 
+### 10. Alerts fire in Prometheus but nothing reaches Slack
+
+**Spotted:** Prometheus `/alerts` shows alerts `FIRING`, but the Slack channels stay empty.
+**Diagnose** — walk the delivery chain Prometheus → Alertmanager → Slack:
+```bash
+curl -s localhost:9093/api/v2/alerts | jq '.[].labels.alertname'          # AM received them? (yes)
+curl -s localhost:9090/api/v1/alertmanagers | jq '.data.activeAlertmanagers'  # Prom -> AM wired? (yes)
+sudo docker compose -f monitoring/docker-compose.yml logs --tail=20 alertmanager | grep -i notify
+#  ERROR ... "slack-critical/slack[0]: ... open /etc/alertmanager/secrets/slack_critical: permission denied"
+sudo head -c 45 monitoring/alertmanager/secrets/slack_critical   # real webhook, not a placeholder
+```
+**Cause:** the pipeline is fine and the webhooks are real — the `prom/alertmanager` container runs as
+`nobody` (uid 65534) and could not **read** the webhook files, which had been written root-owned with
+mode `0600`. Alertmanager reads `api_url_file` at notify time, so it retried and failed on every send.
+**Fix:** make the files readable by the container user (and the dir traversable), then restart:
+```bash
+sudo chmod 755 monitoring/alertmanager/secrets
+sudo chmod 644 monitoring/alertmanager/secrets/slack_alerts monitoring/alertmanager/secrets/slack_critical
+sudo docker compose -f monitoring/docker-compose.yml restart alertmanager
+```
+`644` is fine for a single-admin lab box; for a tighter setup `chown 65534:65534` the files and keep
+`0600`. (This also confirmed the two-channel routing end to end: the `critical` alert landed in
+`#midnight-critical`, the `warning` alerts in `#midnight-alerts`.)
+
 ## Roadmap / possible improvements
 
 Already done in this repo: **IaC** ([`terraform/`](terraform/) — host + `gp3` volume with
