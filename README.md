@@ -404,6 +404,39 @@ bump + `--stage cardano` handles this — the trap only bites a hand-rolled bina
 next start the node re-replays the ledger from the local immutable DB (no re-download), then crosses
 the fork.
 
+### 7. db-sync boots with no schema dir
+
+**Spotted:** db-sync crash-loops right after starting.
+```bash
+journalctl -u cardano-db-sync -f
+# Version number: 13.6.0.5
+# cardano-db-sync: /home/midnight/cardano-data/schema: getDirectoryContents:openDirStream: does not exist
+# cardano-db-sync.service: Main process exited, code=exited, status=1/FAILURE  (restart loop)
+```
+**Diagnose:**
+```bash
+ls -ld /home/midnight/cardano-data/schema     # missing
+```
+**Cause:** the db-sync install step removed the live `cardano-data/schema` *before* fetching the
+replacement. If the re-run started without a fresh `tmp/schema` in hand (e.g. `tmp/` had been
+cleaned, or the download/extract didn't complete), the good schema was already gone — db-sync needs
+`--schema-dir` to exist at boot, so it dies. A hand-patched copy of the script on the host hit this;
+the ordering was the weak point.
+**Fix:** reorder the step so `cardano-data/schema` is deleted **only immediately before** the
+freshly extracted copy replaces it, and **only after** `tar` has succeeded (guarded by
+`test -d tmp/schema`). A failed download or extract now aborts before anything is removed, so a
+running DB never loses its schema. To recover a host already in this state, re-extract the schema
+matching the *installed* binary version:
+```bash
+sudo systemctl stop cardano-db-sync
+sudo -u midnight HOME=/home/midnight bash -lc '
+  V=13.6.0.5; cd ~/tmp
+  curl -L -O https://github.com/IntersectMBO/cardano-db-sync/releases/download/$V/cardano-db-sync-$V-linux.tar.gz
+  rm -rf dbschema && mkdir dbschema && tar -xzf cardano-db-sync-$V-linux.tar.gz -C dbschema
+  rm -rf ~/cardano-data/schema && cp -a dbschema/schema ~/cardano-data/ && chmod -R u+w ~/cardano-data/schema'
+sudo systemctl start cardano-db-sync
+```
+
 ## Roadmap / possible improvements
 
 Already done in this repo: **IaC** ([`terraform/`](terraform/) — host + `gp3` volume with

@@ -299,18 +299,19 @@ function stage_dbsync() {
     log_info "installing cardano-db-sync ${DBSYNC_VERSION} and its systemd service"
     log_warn "cardano-db-sync ${DBSYNC_VERSION} publishes no checksum file; this download is not checksum-verified (upstream limitation)"
     local home; home="$(user_home)"
-    # The db-sync tarball ships bin/ and schema/ read-only (0555). That breaks naive re-runs:
+    # The db-sync tarball ships bin/ and schema/ read-only (0555), which breaks naive re-runs:
     # tar can't overwrite into a 0555 dir, cp can't overwrite a 0555 binary, and a non-root user
-    # can't rm inside a 0555 dir. So first restore write on any leftovers (chmod works as the
-    # owner regardless of the write bit) and clean them, then extract; `cp -f` replaces the
-    # read-only binaries in place, and cp (not mv) sidesteps the directory-rename write rule.
-    run_as_user "mkdir -p \$HOME/tmp \$HOME/cardano-data; \
-        chmod -R u+w \$HOME/tmp/bin \$HOME/tmp/schema \$HOME/cardano-data/schema 2>/dev/null || true; \
-        rm -rf \$HOME/tmp/bin \$HOME/tmp/schema \$HOME/cardano-data/schema; \
-        cd \$HOME/tmp && \
+    # can't rm inside a 0555 dir (chmod works as the owner regardless of the write bit, so we
+    # restore write before removing). Crucially, the live cardano-data/schema is removed ONLY
+    # right before the fresh copy replaces it, and only after the tarball has extracted — so a
+    # failed download/extract can never leave db-sync with no schema dir to start from.
+    run_as_user "mkdir -p \$HOME/tmp \$HOME/cardano-data && cd \$HOME/tmp && \
+        { chmod -R u+w \$HOME/tmp/bin \$HOME/tmp/schema 2>/dev/null || true; } && rm -rf \$HOME/tmp/bin \$HOME/tmp/schema && \
         curl -L -O https://github.com/IntersectMBO/cardano-db-sync/releases/download/${DBSYNC_VERSION}/cardano-db-sync-${DBSYNC_VERSION}-linux.tar.gz && \
         tar -xzf cardano-db-sync-${DBSYNC_VERSION}-linux.tar.gz && \
+        test -d \$HOME/tmp/schema && \
         cp -f bin/* \$HOME/.local/bin/ && \
+        { chmod -R u+w \$HOME/cardano-data/schema 2>/dev/null || true; } && rm -rf \$HOME/cardano-data/schema && \
         cp -a \$HOME/tmp/schema \$HOME/cardano-data/ && chmod -R u+w \$HOME/cardano-data/schema && \
         cd \$HOME/cardano-data && curl -O https://book.world.dev.cardano.org/environments/${network}/db-sync-config.json && \
         sed -i 's|\"NodeConfigFile\": \"config.json\"|\"NodeConfigFile\": \"${home}/.local/share/${network}/config.json\"|' \$HOME/cardano-data/db-sync-config.json"
