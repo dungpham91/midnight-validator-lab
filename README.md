@@ -263,87 +263,146 @@ the latest at time of writing.
 
 ## Troubleshooting log (first real pre-prod run)
 
-Field notes from bringing the node up end-to-end on a fresh Ubuntu 24.04 EC2 host. Each entry
-is symptom → evidence → root cause → fix, in the order they surfaced. The fixes are in
-`scripts/setup_node.sh` and `RUNBOOK.md`.
+A reproducible walkthrough of every issue hit bringing the node up end-to-end on a fresh Ubuntu
+24.04 EC2 host — the exact command that surfaced each one, the log it produced, how it was traced,
+and the fix. All node work runs as the `midnight` service user; `cardano-cli` needs
+`CARDANO_NODE_SOCKET_PATH` pointed at the node socket. The fixes live in `scripts/setup_node.sh`
+and `RUNBOOK.md`.
+
+Shorthands used below:
+```bash
+SOCK=/home/midnight/cardano-data/db/node.socket
+CLI=/home/midnight/.local/bin/cardano-cli
+tip() { sudo -u midnight bash -c "CARDANO_NODE_SOCKET_PATH=$SOCK $CLI query tip --testnet-magic 1"; }
+psqlc() { sudo -u midnight psql -d cexplorer -tAc "$1"; }
+```
 
 ### 1. db-sync install aborts moving the schema dir
 
+**Spotted:** running the install stage.
+```bash
+sudo ./setup_node.sh --stage dbsync
+# ...
+# mv: cannot move '/home/midnight/tmp/schema' to '/home/midnight/cardano-data/schema': Permission denied
 ```
-mv: cannot move '/home/midnight/tmp/schema' to '/home/midnight/cardano-data/schema': Permission denied
+**Diagnose** — the target is writable, so *what* can't be moved?
+```bash
+ls -ld /home/midnight/cardano-data /home/midnight/tmp/schema
+# drwxrwxr-x 3 midnight midnight ... /home/midnight/cardano-data   <- writable
+# dr-xr-xr-x 2 midnight midnight ... /home/midnight/tmp/schema     <- 0555, no write bit
 ```
-
-The install runs as the non-root `midnight` user. The db-sync tarball ships `schema/` **read-only
-(0555)**, and moving a *directory* to a new parent needs write permission on the directory itself
-(the kernel has to rewrite its `..` entry) — which 0555 denies to a non-root user. The RUNBOOK hid
-this by using `sudo mv` (root bypasses the check); the script, correctly running as the service
-user, hit it. **Fix:** `cp -a` instead of `mv` (copying needs no write on the source), then
-`chmod -R u+w` so the dir is idempotently removable on a re-run.
+**Cause:** the db-sync tarball ships `schema/` read-only (0555). Moving a *directory* to a new
+parent rewrites the directory's own `..` entry, which needs write permission **on that directory** —
+denied to a non-root user. The RUNBOOK hid it with `sudo mv` (root bypasses the check); the script
+runs as `midnight`, so it surfaced.
+**Fix:** `cp -a` instead of `mv` (a copy needs no write on the source), then `chmod -R u+w` so the
+dir is idempotently removable on a re-run.
 
 ### 2. db-sync re-run can't overwrite its binaries
 
+**Spotted:** re-running the stage after fix #1.
+```bash
+sudo ./setup_node.sh --stage dbsync
+# cp: cannot create regular file '/home/midnight/.local/bin/cardano-db-sync': Permission denied
+# cp: cannot create regular file '/home/midnight/.local/bin/cardano-db-tool': Permission denied
+# ... (all db-sync binaries)
 ```
-cp: cannot create regular file '/home/midnight/.local/bin/cardano-db-sync': Permission denied
+**Diagnose:**
+```bash
+ls -l /home/midnight/.local/bin/cardano-db-sync
+# -r-xr-xr-x 1 midnight midnight ... cardano-db-sync   <- 0555 from the first run
 ```
-
-Same read-only-artifact root cause, second face: the tarball's **binaries are 0555** too, so a
-second run's `cp` can't overwrite them in place, and the non-root user can't `rm` inside a leftover
-0555 dir either. **Fix:** `cp -f` (unlinks the read-only target and recreates it) plus a
-`chmod -R u+w` → `rm -rf` cleanup of any prior extract before untarring.
+**Cause:** same read-only artifact, second face — the binaries are 0555 too, so a plain `cp` can't
+truncate them in place, and the non-root user can't `rm` inside a leftover 0555 dir on a re-run.
+**Fix:** `cp -f` (unlinks the read-only target and recreates it), plus a `chmod -R u+w` → `rm -rf`
+cleanup of any prior extract before untarring.
 
 ### 3. db-sync logs "node.socket does not exist"
 
+**Spotted:** checking db-sync right after it started.
+```bash
+journalctl -u cardano-db-sync -n 20 --no-pager
+# Connection Attempt Exception, destination LocalAddress "/home/midnight/cardano-data/db/node.socket"
+#   exception: Network.Socket.connect: <socket: 24>: does not exist (No such file or directory)
 ```
-Connection Attempt Exception, destination LocalAddress ".../db/node.socket"
-  exception: Network.Socket.connect: does not exist (No such file or directory)
+**Diagnose** — is cardano-node dead, or just not ready?
+```bash
+systemctl is-active cardano-node          # active
+journalctl -u cardano-node -n 5 --no-pager
+# ChainDB.ReplayBlock.LedgerReplay ... Replayed block: slot 120... out of 128217983. Progress: 94.5%
 ```
-
-**Not a bug** — startup ordering. cardano-node only opens its local socket after it finishes
-replaying the ledger from the Mithril snapshot (tens of minutes on first boot). db-sync
-(`Requires=cardano-node`) simply retries every ~20 s until the socket appears. No action needed;
-documented so it isn't mistaken for a failure.
+**Cause:** not a bug — startup ordering. cardano-node opens its local socket only *after* it finishes
+replaying the ledger (tens of minutes from a Mithril snapshot). db-sync (`Requires=cardano-node`)
+retries every ~20 s until the socket appears.
+**Fix:** none — wait for replay to reach 100%. Documented so it isn't mistaken for a failure.
 
 ### 4. "sync 100%" while still a day behind
 
-`--stage verify-sync` reported `100%` even though `now() - max(block.time)` was **~1 day**. The
-original metric was *time-weighted* — `(max−min)/(now−min)` over block timestamps — which, on a
-chain that is years old, rounds to 100% while the DB is still a full day short. Useless as a gate
-to start the validator. **Fix:** measure **lag in seconds** (`now() - max(block.time)`), which does
-not saturate, and report cardano-node's own `syncProgress` alongside it. The `--min-sync-percent`
-flag became `--max-lag-seconds` (default 180).
+**Spotted:** the built-in check disagreed with reality.
+```bash
+sudo ./setup_node.sh --stage verify-sync
+# INFO  cardano-db-sync progress: 100%
+psqlc "SELECT max(block_no), now()-max(time) AS behind_tip FROM block;"
+# 4929534 | 1 day 00:38:17          <- actually a full day behind
+```
+**Cause:** the old metric was *time-weighted* — `(max−min)/(now−min)` over block timestamps. On a
+chain that is years old, the last day is a rounding error, so it reports 100% while the DB is a day
+short. Useless as a gate for starting the validator.
+**Fix:** measure **lag in seconds** (`now() - max(block.time)`), which does not saturate, and print
+cardano-node's own `syncProgress` next to it. `--min-sync-percent` became `--max-lag-seconds`
+(default 180).
 
 ### 5. cardano-node stalls at the hard-fork boundary
 
+**Spotted:** `behind_tip` never shrank. Confirm the node tip is frozen — two samples, 60 s apart:
+```bash
+tip | grep -E 'block|slot|syncProgress'; sleep 60; tip | grep -E 'block|slot|syncProgress'
+# both identical:  "block": 4929534,  "slot": 128217983,  "syncProgress": "99.93"
 ```
-ChainSync.Client.Exception ... HeaderError ... ObsoleteNode (Version 11) (Version 10)
-Net.Peers.Ledger.NotEnoughBigLedgerPeers {"numOfBigLedgerPeers":15,"target":75}
-cardano-cli query tip → "syncProgress": "99.93"   (stuck; block/slot not advancing)
+**Diagnose** — pull the real ChainSync error (full lines), and rule out clock/topology:
+```bash
+journalctl -u cardano-node --no-pager -l -n 400 | grep -Ei 'ChainSync|ObsoleteNode|NotEnough' | tail
+# HeaderError (...) OtherHeaderEnvelopeError ... ObsoleteNode (Version 11) (Version 10)
+#   (Tip ... BlockNo 4929534) (Tip ... BlockNo 4933398)   <- our tip vs peer tip (~1 day ahead)
+# Net.Peers.Ledger.NotEnoughBigLedgerPeers {"numOfBigLedgerPeers":15,"target":75}
+date -u                                     # clock correct — not skew
+cat /home/midnight/.local/share/preprod/topology.json   # peers fine — not topology
 ```
-
-The node reached the Mithril snapshot tip and then **could not advance** — every peer's header was
-rejected with `ObsoleteNode`. preprod had run the **van Rossem (PV11)** intra-era hard fork in late
-June 2026, and `cardano-node 10.6.2` (the version pinned from the docs) is too old to decode
-protocol-version-11 headers. Clock and topology were fine — it was purely a stale binary.
-**Fix:** upgrade to `cardano-node 11.0.1` (first release across PV11) and the matched
-`cardano-db-sync 13.7.2.1`, add the `liburing2`/`libsnappy1v5` runtime libs node 11.x needs, and
-reframe version pinning to track the network's *current* hard-fork requirement (verified against
-upstream release notes) rather than a fixed number copied from a doc.
+**Cause:** peers are on **protocol version 11**; this node only understands v10, so every header is
+rejected with `ObsoleteNode` and the chain can't advance past the fork slot. preprod ran the **van
+Rossem (PV11)** intra-era hard fork in late June 2026 (confirmed against the cardano-node release
+notes); `cardano-node 10.6.2` — the version pinned from the docs — is obsolete after it.
+**Fix:** `cardano-node 11.0.1` (first release across PV11) + matched `cardano-db-sync 13.7.2.1`, add
+the `liburing2`/`libsnappy1v5` runtime libs node 11.x links against, and pin to the network's
+*current* hard-fork requirement (verified against upstream releases) instead of a fixed doc number.
 
 ### 6. node 11.0.1 crash-loops on a binary-only upgrade
 
+**Spotted:** after swapping only the binaries and restarting.
+```bash
+systemctl is-active cardano-node          # activating   <- crash loop, not "active"
+journalctl -u cardano-node -n 25 --no-pager
+# Startup.NetworkConfigUpdateWarning ... Bootstrap peers (field 'bootstrapPeers') are not
+#   compatible with Genesis syncing mode, reverting to 'DontUseBootstrapPeers' ...
+# cardano-node: Unsupported legacy peer snapshot version.
+#   error, called at src/Cardano/Node/Run.hs:814:26 ...
+# cardano-node.service: Main process exited, code=exited, status=1/FAILURE
+# cardano-node.service: Scheduled restart job, restart counter is at 13.
 ```
-Startup.NetworkConfigUpdateWarning ... Bootstrap peers are not compatible with Genesis syncing mode
-cardano-node: Unsupported legacy peer snapshot version.   (exit 1, restart loop)
+**Cause:** a major-version upgrade is not a binary swap. cardano-node 11.x runs in `GenesisMode` and
+reads an updated `topology.json` + `peer-snapshot.json`; keeping the old 10.6.2 `share/` makes it
+reject the legacy peer-snapshot format and exit on boot.
+**Fix:** refresh `~/.local/share/<network>/` from the new tarball too (the genesis files are
+byte-identical, same hashes, so the ledger DB is untouched):
+```bash
+tar -xz -f cardano-node-11.0.1-linux-amd64.tar.gz -C ~/tmp/nodeup ./bin ./share
+cp -f  ~/tmp/nodeup/bin/cardano-* ~/.local/bin/
+cp -rf ~/tmp/nodeup/share/.       ~/.local/share/
 ```
-
-A major-version upgrade is **not** a binary swap. cardano-node 11.x runs in `GenesisMode` and reads
-an updated `topology.json` + `peer-snapshot.json` format; reusing the old 10.6.2 `share/` (config,
-topology, peer snapshot) makes it reject the legacy snapshot and exit on boot. **Fix:** refresh
-`~/.local/share/<network>/` from the new tarball alongside the binaries — the new genesis files are
-identical (same hashes) so the ledger DB is untouched. `scripts/setup_node.sh`'s `cardano` stage
-already extracts both `./bin` and `./share`, so a version bump + `--stage cardano` handles this; the
-trap only bites a hand-rolled binary-only copy. (On first start after the upgrade the node re-replays
-the ledger from the local immutable DB — no re-download — then crosses the fork.)
+`scripts/setup_node.sh`'s `cardano` stage already extracts both `./bin` and `./share`, so a version
+bump + `--stage cardano` handles this — the trap only bites a hand-rolled binary-only copy. On the
+next start the node re-replays the ledger from the local immutable DB (no re-download), then crosses
+the fork.
 
 ## Roadmap / possible improvements
 
