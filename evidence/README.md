@@ -40,48 +40,56 @@ sudo ./scripts/setup_node.sh --stage prereqs,secrets,mithril,cardano,postgres,db
 ```
 Leave `cardano-db-sync` running overnight. Nothing to capture yet.
 
-## Next morning — capture once DB Sync is ~99%
+## Capture — once the node is up and DB Sync has caught up
 
-**1. Cardano DB Sync progress** (wait until `sync_percent` ≈ 100):
+Run each command from the repo root on the host (`/home/midnight/midnight-validator-lab`).
+Every command `tee`s a file **and** prints to the terminal, so you can commit the file *and*
+screenshot the output.
+
+**1. Cardano node + db-sync are at the chain tip.** `verify-sync` reports the node's own
+`syncProgress` and how many seconds db-sync trails the tip (small = caught up):
 ```bash
+sudo ./scripts/setup_node.sh --stage verify-sync | tee evidence/01-sync-status.txt
 sudo -u midnight psql -d cexplorer -c \
   "SELECT block_no, slot_no, time FROM block ORDER BY id DESC LIMIT 1;" \
-  | tee evidence/01-dbsync-latest-block.txt
-sudo -u midnight psql -d cexplorer -c \
-  "SELECT round(100*(EXTRACT(epoch FROM (MAX(time) AT TIME ZONE 'UTC')) - EXTRACT(epoch FROM (MIN(time) AT TIME ZONE 'UTC'))) / (EXTRACT(epoch FROM (NOW() AT TIME ZONE 'UTC')) - EXTRACT(epoch FROM (MIN(time) AT TIME ZONE 'UTC'))),2) AS sync_percent FROM block;" \
-  | tee evidence/02-dbsync-sync-percent.txt
+  | tee evidence/02-dbsync-latest-block.txt
 ```
+📷 Screenshot the `verify-sync` line: `syncProgress 100.00%` + `db-sync ... behind tip` (seconds).
 
-**2. Bring up the validator** (installs node + keys + starts once sync is ready):
-```bash
-sudo ./scripts/setup_node.sh --stage midnight,keys,env,service --wait-sync \
-     --db-secret midnight-validator-lab-preprod/postgres --node-name my-fno
-```
-
-**3. Session keys loaded + block progression:**
+**2. Session keys are loaded** (the node read Aura / Grandpa / Cross-chain from the keystore):
 ```bash
 journalctl -u midnight-node --no-pager | grep -Ei 'AURA pubkey|GRANDPA pubkey|CROSS_CHAIN pubkey' \
   | tee evidence/03-session-keys.txt
-journalctl -u midnight-node --no-pager | grep -E 'Postgres|Best:|Imported|peers' \
-  | tail -n 100 | tee evidence/04-block-progression.txt
 ```
+📷 Screenshot the three `pubkey` lines.
+
+**3. Block progression — take TWO snapshots a few minutes apart** (the block number must go up):
+```bash
+journalctl -u midnight-node --no-pager | grep -E 'Best:|Imported' | tail -n 20 \
+  | tee evidence/04-block-progression-1.txt
+sleep 300
+journalctl -u midnight-node --no-pager | grep -E 'Best:|Imported' | tail -n 20 \
+  | tee evidence/04-block-progression-2.txt
+```
+📷 Screenshot both — the highest `Best:#` in snapshot 2 should exceed snapshot 1.
 
 **4. Health checker snapshot:**
 ```bash
 sudo -u midnight ./scripts/node_health_check.py --once --verbose | tee evidence/05-health-check.txt
 ```
+📷 Screenshot the coloured PASS/FAIL summary.
 
-**5. Monitoring works end-to-end** (start the stack, screenshot Grafana):
+**5. Monitoring dashboard (Grafana):**
 ```bash
-cd monitoring && docker compose up -d
-# From your laptop, SSM port-forward 3000 (see terraform/README.md), then screenshot:
-#   evidence/06-grafana-dashboard.png   (best/finalized block, peers, host)
+cd monitoring && docker compose up -d && cd ..
+# From your laptop, SSM port-forward 3000 (see terraform/README.md), open http://localhost:3000
 ```
+📷 Screenshot Grafana → `evidence/06-grafana-dashboard.png` (block height, peers, host metrics).
 
 **6. Prove an alert fires to Slack** (stop the node → MidnightNodeDown → recover):
 ```bash
 sudo systemctl stop midnight-node          # wait ~2 min: alert fires to #midnight-critical
-# screenshot the Slack message → evidence/07-slack-alert.png
+# 📷 screenshot the Slack message → evidence/07-slack-alert.png
 sudo systemctl start midnight-node         # sends the resolved notification
 ```
 
