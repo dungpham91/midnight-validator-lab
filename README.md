@@ -68,7 +68,7 @@ architecture (secrets/KMS/IAM/network) is in [`SECURITY.md`](SECURITY.md).
 | Health automation | [`scripts/`](scripts/) | `node_health_check.py` — RPC health checker with regression diffing |
 | Key management | [`SECURITY.md`](SECURITY.md) | Storage, rotation, incident response for the four validator keys |
 | Provisioning | [`terraform/`](terraform/) | One-command AWS host with security baked in (Secrets Manager, KMS, IMDSv2, SSM) |
-| Run evidence | [`evidence/`](evidence/) | Sync %, block-progression logs, dashboard screenshots |
+| Run evidence | [`evidence/`](evidence/) | Block-progression logs, dashboards, Slack alerts — indexed in [`evidence/SUMMARY.md`](evidence/SUMMARY.md) |
 
 ## Repo layout
 
@@ -246,6 +246,45 @@ the latest at time of writing.
 | checkov · gitleaks · shellcheck · ruff · pytest · yamllint | latest (installed in CI) |
 | AWS CLI · Session Manager plugin | v2 · latest |
 | OS | Ubuntu 24.04 LTS |
+
+## Evidence & results
+
+Run end to end on AWS (Singapore) against Cardano/Midnight **pre-prod**. Captured logs and
+screenshots are in [`evidence/`](evidence/); [`evidence/SUMMARY.md`](evidence/SUMMARY.md) maps each
+file to what it demonstrates.
+
+**Outcome**
+- **Cardano layer — fully synced across a live hard fork.** cardano-node reached `syncProgress 100%`
+  and cardano-db-sync populated `cexplorer` with `block_no` climbing — including across the
+  **van Rossem / PV11** intra-era hard fork that made the originally-pinned node version obsolete
+  (Troubleshooting [#5](#5-cardano-node-stalls-at-the-hard-fork-boundary)). This is the demonstrable
+  block-height increase.
+- **Midnight node — operational.** Runs in `--validator` mode, session keys loaded, on the correct
+  chain, peered with an official pre-prod bootnode. Prometheus/Alertmanager/Grafana scrape it and
+  **three alerts route to two Slack channels by severity**, end to end.
+
+**Why "Peer count = 1" and "Best block = 0" are expected (not a fault)**
+- **1 peer** — of the two official pre-prod bootnodes only `bootnode-2` was reachable on TCP/30333
+  (`bootnode-1`'s endpoint was down from our side); the pre-prod P2P set is small.
+- **Best block 0** — the reachable bootnode itself reports `bestNumber: 0` and our node's genesis
+  hash matches it, so there is **no block above genesis to import**: the node is *synced to what the
+  network exposes*, not stuck. A fresh FNO advancing its own Midnight height needs committee
+  authorisation + the n+2 epoch (out of a lab window), and this node is deliberately **not**
+  registered with the Foundation — it is torn down afterwards. Full detective trail in
+  Troubleshooting [#9](#9-midnight-node-sits-at-best-0-and-session-keys-loaded-grep-is-empty).
+
+## Lab status
+
+Delivered and captured in [`evidence/`](evidence/):
+
+- [x] **Node onboarding** — cardano-node + cardano-db-sync + PostgreSQL + midnight-node (validator),
+  automated by [`scripts/setup_node.sh`](scripts/setup_node.sh), documented in [`RUNBOOK.md`](RUNBOOK.md)
+- [x] **Proof of a syncing/operational node** — Cardano block-height progression + node health
+  ([`evidence/SUMMARY.md`](evidence/SUMMARY.md))
+- [x] **Monitoring & alerting** — Prometheus + Alertmanager + Grafana; 10 alert rules, severity-routed
+  to two Slack channels ([`monitoring/`](monitoring/))
+- [x] **Automation & IaC** — `setup_node.sh`, `node_health_check.py`, [`terraform/`](terraform/)
+- [x] **Security** — key storage, rotation, incident response in [`SECURITY.md`](SECURITY.md)
 
 ## Notes & limitations
 
