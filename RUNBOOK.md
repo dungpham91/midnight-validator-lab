@@ -475,6 +475,7 @@ midnight-node --version
 **3.2.1 Generate session keys**
 ```bash
 cd ~
+export CFG_PRESET=preprod         # required — see gotcha below
 # Generate AURA (sr25519)
 midnight-node key generate --scheme sr25519 --output-type json > aura.json
 # Generate GRANDPA (ed25519)
@@ -482,7 +483,14 @@ midnight-node key generate --scheme ed25519 --output-type json > grandpa.json
 # Generate CROSS-CHAIN (ecdsa)
 midnight-node key generate --scheme ecdsa --output-type json > cross_chain.json
 ```
-> Back up these JSON files immediately in a secure, offline location.
+> **Gotcha — `key` subcommands load the chain config.** midnight-node's `key generate` / `key insert`
+> / `key generate-node-key` build the chain config before running, so they fail with
+> `Error: Input("chainspec_genesis_block not configured")` unless **`CFG_PRESET=preprod` is exported
+> and you run from `~`**. The preset file `res/cfg/preprod.toml` points at the genesis with *relative*
+> paths (`chainspec_genesis_block = "res/genesis/genesis_block_preprod.mn"`), which only resolve when
+> the cwd is `~` (where `res/` lives). Keep `CFG_PRESET` exported for every `key` command in §3.2–3.3.
+>
+> Back up the JSON files immediately in a secure, offline location.
 
 **3.2.2 Generate the network key**
 ```bash
@@ -502,6 +510,8 @@ midnight-node key inspect-node-key --file "$NETWORK_DIR/secret_ed25519"
 ```bash
 sudo apt-get install jq -y
 
+cd ~
+export CFG_PRESET=preprod          # key insert loads the chain config too (see §3.2.1 gotcha)
 KEYSTORE_PATH="$HOME/data/chains/midnight_preprod/keystore"
 mkdir -p "$KEYSTORE_PATH"
 

@@ -426,7 +426,11 @@ function stage_midnight() {
 # ─── Stage: validator keys ────────────────────────────────────────────────────────────
 function stage_keys() {
     log_info "generating validator keys, keystore, and registration file"
-    run_as_user "cd \$HOME && \
+    # midnight-node's `key` subcommands load the chain config, so they need CFG_PRESET set and must
+    # run from \$HOME — the preset toml (res/cfg/${network}.toml) references genesis via RELATIVE
+    # paths (res/genesis/...), resolved from the cwd. Without both: "chainspec_genesis_block not
+    # configured".
+    run_as_user "cd \$HOME && export CFG_PRESET=${network} && \
         \$HOME/.local/bin/midnight-node key generate --scheme sr25519 --output-type json > aura.json && \
         \$HOME/.local/bin/midnight-node key generate --scheme ed25519 --output-type json > grandpa.json && \
         \$HOME/.local/bin/midnight-node key generate --scheme ecdsa   --output-type json > cross_chain.json && \
@@ -434,7 +438,8 @@ function stage_keys() {
         NETWORK_DIR=\$HOME/data/chains/midnight_${network}/network && mkdir -p \$NETWORK_DIR && chmod 700 \$NETWORK_DIR && \
         \$HOME/.local/bin/midnight-node key generate-node-key --file \$NETWORK_DIR/secret_ed25519"
 
-    run_as_user "KEYSTORE=\$HOME/data/chains/midnight_${network}/keystore && mkdir -p \$KEYSTORE && \
+    run_as_user "cd \$HOME && export CFG_PRESET=${network} && \
+        KEYSTORE=\$HOME/data/chains/midnight_${network}/keystore && mkdir -p \$KEYSTORE && \
         \$HOME/.local/bin/midnight-node key insert --keystore-path \$KEYSTORE --scheme sr25519 --key-type aura --suri \"\$(jq -r .secretPhrase \$HOME/aura.json)\" && \
         \$HOME/.local/bin/midnight-node key insert --keystore-path \$KEYSTORE --scheme ed25519 --key-type gran --suri \"\$(jq -r .secretPhrase \$HOME/grandpa.json)\" && \
         \$HOME/.local/bin/midnight-node key insert --keystore-path \$KEYSTORE --scheme ecdsa   --key-type beef --suri \"\$(jq -r .secretPhrase \$HOME/cross_chain.json)\""

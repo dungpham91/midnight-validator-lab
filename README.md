@@ -437,6 +437,30 @@ sudo -u midnight HOME=/home/midnight bash -lc '
 sudo systemctl start cardano-db-sync
 ```
 
+### 8. `key generate` fails: "chainspec_genesis_block not configured"
+
+**Spotted:** the `keys` stage.
+```bash
+sudo ./setup_node.sh --stage keys ...
+# INFO  generating validator keys, keystore, and registration file
+# Error: Input("chainspec_genesis_block not configured")
+```
+**Diagnose** — read what the preset expects, then test the fix:
+```bash
+sed -n '1,16p' /home/midnight/res/cfg/preprod.toml
+# chainspec_genesis_block = "res/genesis/genesis_block_preprod.mn"   <- RELATIVE path
+sudo -u midnight HOME=/home/midnight bash -lc \
+  'cd ~ && CFG_PRESET=preprod ~/.local/bin/midnight-node key generate --scheme sr25519 --output-type json'
+# -> prints a key JSON   (works with CFG_PRESET + cwd=~)
+```
+**Cause:** midnight-node's `key generate` / `key insert` / `key generate-node-key` build the chain
+config before doing anything, so they need `CFG_PRESET` set. The preset file
+`res/cfg/preprod.toml` references genesis with *relative* paths (`res/genesis/…`), which only resolve
+when the command runs from `~` (where `res/` lives). The docs' key snippets omit both, so the step
+fails on a fresh box.
+**Fix:** run every `key` command with `cd ~ && export CFG_PRESET=<network>`. In `setup_node.sh` the
+`keys` stage now sets both; `RUNBOOK.md` §3.2–3.3 note it too.
+
 ## Roadmap / possible improvements
 
 Already done in this repo: **IaC** ([`terraform/`](terraform/) — host + `gp3` volume with
