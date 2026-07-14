@@ -14,6 +14,7 @@ redacted in the images.
 | File | What it shows |
 |---|---|
 | `terraform-apply.jpg` | `terraform apply` → **26 resources created** (VPC, EC2 `r6i.2xlarge`, KMS CMK, Secrets Manager, IAM, SG, flow logs) + outputs. Secrets redacted. |
+| `terraform-destroy.jpg` | `terraform destroy` → **26 resources destroyed** — clean teardown, no lingering paid resources. |
 
 ## Node onboarding & automation
 
@@ -67,3 +68,13 @@ is in the root [`README.md`](../README.md) Troubleshooting #9:
 - **Health checker = DEGRADED.** It honestly fails `peer_count` (1 < 3) and `has_block_height` (0)
   while passing `rpc_reachable` and `sync_gap` — i.e. the tool correctly detects the conditions
   above rather than green-washing.
+
+### Version note (evidence vs. repo pin)
+
+The screenshots show **cardano-db-sync 13.6.0.5**, while the repo pins **13.7.2.1** — this is
+intentional, not a mismatch. The PV11 blocker was *cardano-node*, so on the throwaway host only that
+was upgraded (10.6.2 → 11.0.1); db-sync 13.6.0.5 kept importing across the fork (PV11 is intra-era
+Conway, so the older db-sync still parses the blocks) and was left as-is. The repo pins **13.7.2.1**
+because it is the officially matched pair for node 11.0.1 and the correct choice for a fresh install.
+`cardano-node` in the final state is `11.0.1` (it had to be, to cross the fork and reach
+`syncProgress 100%`).

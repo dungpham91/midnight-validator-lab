@@ -63,7 +63,7 @@ architecture (secrets/KMS/IAM/network) is in [`SECURITY.md`](SECURITY.md).
 | Area | Where | Notes |
 |---|---|---|
 | Node onboarding | [`RUNBOOK.md`](RUNBOOK.md) | Mithril-bootstrapped cardano-node 11.0.1 → PostgreSQL 17 → cardano-db-sync 13.7.2.1 → midnight-node 0.22.2 in validator mode, key generation, FNO registration |
-| Monitoring & alerting | [`monitoring/`](monitoring/) | Prometheus + Alertmanager + Grafana + node_exporter, three core alerts routed to Slack |
+| Monitoring & alerting | [`monitoring/`](monitoring/) | Prometheus + Alertmanager + Grafana + node_exporter; 10 alert rules (3 core node + supporting + host), severity-routed to two Slack channels |
 | Setup automation | [`scripts/setup_node.sh`](scripts/setup_node.sh) | Scripts the runbook (Cardano → Postgres → db-sync → Midnight), logging + `--dry-run` |
 | Health automation | [`scripts/`](scripts/) | `node_health_check.py` — RPC health checker with regression diffing |
 | Key management | [`SECURITY.md`](SECURITY.md) | Storage, rotation, incident response for the four validator keys |
@@ -419,6 +419,13 @@ notes); `cardano-node 10.6.2` — the version pinned from the docs — is obsole
 **Fix:** `cardano-node 11.0.1` (first release across PV11) + matched `cardano-db-sync 13.7.2.1`, add
 the `liburing2`/`libsnappy1v5` runtime libs node 11.x links against, and pin to the network's
 *current* hard-fork requirement (verified against upstream releases) instead of a fixed doc number.
+
+> **What the evidence shows vs. what the repo pins.** Only `cardano-node` was the blocker, so on the
+> (throwaway) host only it was upgraded to `11.0.1`; `cardano-db-sync` stayed at **13.6.0.5** and kept
+> importing fine — PV11 is *intra-era* (still Conway), so the older db-sync parses the new blocks — so
+> it was not re-installed. That is why the screenshots in [`evidence/`](evidence/) show db-sync
+> `13.6.0.5`. The repo pins **13.7.2.1** because that is the officially matched pair for node `11.0.1`
+> and the right choice for a fresh install. See [`evidence/SUMMARY.md`](evidence/SUMMARY.md).
 
 ### 6. node 11.0.1 crash-loops on a binary-only upgrade
 
