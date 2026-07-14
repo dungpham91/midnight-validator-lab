@@ -329,6 +329,22 @@ protocol-version-11 headers. Clock and topology were fine — it was purely a st
 reframe version pinning to track the network's *current* hard-fork requirement (verified against
 upstream release notes) rather than a fixed number copied from a doc.
 
+### 6. node 11.0.1 crash-loops on a binary-only upgrade
+
+```
+Startup.NetworkConfigUpdateWarning ... Bootstrap peers are not compatible with Genesis syncing mode
+cardano-node: Unsupported legacy peer snapshot version.   (exit 1, restart loop)
+```
+
+A major-version upgrade is **not** a binary swap. cardano-node 11.x runs in `GenesisMode` and reads
+an updated `topology.json` + `peer-snapshot.json` format; reusing the old 10.6.2 `share/` (config,
+topology, peer snapshot) makes it reject the legacy snapshot and exit on boot. **Fix:** refresh
+`~/.local/share/<network>/` from the new tarball alongside the binaries — the new genesis files are
+identical (same hashes) so the ledger DB is untouched. `scripts/setup_node.sh`'s `cardano` stage
+already extracts both `./bin` and `./share`, so a version bump + `--stage cardano` handles this; the
+trap only bites a hand-rolled binary-only copy. (On first start after the upgrade the node re-replays
+the ledger from the local immutable DB — no re-download — then crosses the fork.)
+
 ## Roadmap / possible improvements
 
 Already done in this repo: **IaC** ([`terraform/`](terraform/) — host + `gp3` volume with
