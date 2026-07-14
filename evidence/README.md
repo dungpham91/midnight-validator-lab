@@ -25,6 +25,11 @@ So the sensible pattern is:
 > state — `Best:` climbing, peers > 0, Postgres connected. It does **not** author blocks yet:
 > block production only starts after the operator's keys are authorised and the n+2 epoch cycle
 > elapses (RUNBOOK §5.4.3). Capturing the syncing node + working monitoring is the real proof.
+>
+> **Lab stops before Foundation submission.** `partner-chains-public-keys.json` is generated but is
+> **not** submitted to the Foundation — authorisation can't take effect inside a lab window (n+2
+> epochs) and this node is torn down afterwards. So "authored blocks" is intentionally out of scope;
+> the evidence to collect is the *syncing/importing* node with keys loaded, not produced blocks.
 
 ## Evening — start the long sync
 

@@ -562,10 +562,18 @@ EOF
 ```bash
 cat "$OUTPUT_FILE"
 ```
-This JSON file is your **Validator Application**. Share it with the Midnight Foundation to be
-authorised for block production on Preprod. **Only public keys leave the box.**
+This JSON file is your **Validator Application**. In a real onboarding you would share it with the
+Midnight Foundation to be authorised for block production on Preprod. **Only public keys leave the box.**
 
-**3.4.3 What you send, and how to send it safely**
+> **Lab scope — do NOT submit.** This lab stops at a running, syncing validator; it does **not**
+> submit `partner-chains-public-keys.json` to the Foundation. Authorisation is Foundation-gated and
+> only takes effect after the n+2 epoch (days), so it can't complete inside a lab window anyway — and
+> this is a throwaway node that gets `terraform destroy`ed, so its keys should never be registered.
+> The file is still generated to demonstrate the registration step; §3.4.3 below documents *how* you
+> would submit it. Completion here = the node up, keys loaded, and block height progressing (see
+> [`evidence/`](evidence/)). The rest of §3.4 is reference for a real deployment.
+
+**3.4.3 What you send, and how to send it safely (reference — not performed in this lab)**
 
 *What to send (pre-prod):* only `partner-chains-public-keys.json`, which contains exclusively
 **public** keys — the cross-chain ecdsa public key (`partner_chains_key` / `crch`), the Aura

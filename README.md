@@ -253,6 +253,11 @@ the latest at time of writing.
   epoch cycle, a fresh node shows a *syncing* state (`Best: #` climbing, peers > 0, Postgres
   connected) rather than authored blocks within a short window. `evidence/` captures the
   achievable proof; see [`RUNBOOK.md`](RUNBOOK.md) §5.4.3.
+- **No Foundation submission (lab scope).** `partner-chains-public-keys.json` is generated to show
+  the registration step but is deliberately **not** submitted: authorisation is Foundation-gated and
+  only takes effect after n+2 epochs (days), and this is a throwaway node that gets destroyed — its
+  keys should never be registered. "Done" for this lab = node up, keys loaded, block height
+  progressing. Submitting is a real-deployment step, documented in [`RUNBOOK.md`](RUNBOOK.md) §3.4.
 - **IOPS.** The pre-prod spec asks for ≥20,000 effective IOPS. AWS publishes no IOPS figure
   for Lightsail and explicitly recommends EC2 (GP2/Provisioned IOPS) for sustained-IOPS or
   large-database workloads, which this is. Lightsail still completes pre-prod (small DB +
