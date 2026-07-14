@@ -28,7 +28,7 @@ flowchart LR
     KMS["KMS CMK"]
     subgraph HOST["EC2 host · Ubuntu 24.04 · x86_64"]
       subgraph CARDANO["Cardano availability layer"]
-        CN["cardano-node 10.6.2"] --> DBS["cardano-db-sync 13.6.0.5"] --> PG[("PostgreSQL 17 · cexplorer")]
+        CN["cardano-node 11.0.1"] --> DBS["cardano-db-sync 13.7.2.1"] --> PG[("PostgreSQL 17 · cexplorer")]
       end
       MN["midnight-node 0.22.2 --validator<br/>RPC 9933 · metrics 9615 · P2P 6000"]
       MON["Prometheus + Alertmanager<br/>Grafana + node_exporter"]
@@ -62,7 +62,7 @@ architecture (secrets/KMS/IAM/network) is in [`SECURITY.md`](SECURITY.md).
 
 | Area | Where | Notes |
 |---|---|---|
-| Node onboarding | [`RUNBOOK.md`](RUNBOOK.md) | Mithril-bootstrapped cardano-node 10.6.2 → PostgreSQL 17 → cardano-db-sync 13.6.0.x → midnight-node 0.22.2 in validator mode, key generation, FNO registration |
+| Node onboarding | [`RUNBOOK.md`](RUNBOOK.md) | Mithril-bootstrapped cardano-node 11.0.1 → PostgreSQL 17 → cardano-db-sync 13.7.2.1 → midnight-node 0.22.2 in validator mode, key generation, FNO registration |
 | Monitoring & alerting | [`monitoring/`](monitoring/) | Prometheus + Alertmanager + Grafana + node_exporter, three core alerts routed to Slack |
 | Setup automation | [`scripts/setup_node.sh`](scripts/setup_node.sh) | Scripts the runbook (Cardano → Postgres → db-sync → Midnight), logging + `--dry-run` |
 | Health automation | [`scripts/`](scripts/) | `node_health_check.py` — RPC health checker with regression diffing |
@@ -199,8 +199,10 @@ until its keys are authorised and the n+2 epoch cycle elapses (see [`RUNBOOK.md`
   guidance. A production deployment would separate these concerns.
 - **Bare-metal + systemd**, following the official FNO pre-prod runbook (not the Docker
   Compose path, which is a separate install method).
-- **Pinned versions** taken from the FNO pre-prod docs: cardano-node 10.6.2, cardano-db-sync
-  13.6.0.x, midnight-node 0.22.2, PostgreSQL 17, RPC port 9933.
+- **Pinned versions** track what the pre-prod network currently requires — cardano-node 11.0.1
+  and cardano-db-sync 13.7.2.1 (the pair that crosses the van Rossem/PV11 hard fork), midnight-node
+  0.22.2, PostgreSQL 17, RPC port 9933. Cardano versions move with on-chain hard forks, so verify
+  the current requirement against the upstream releases before installing (see RUNBOOK §2.2.1).
 - **WireGuard is skipped**: the overlay is a mainnet-only concern; pre-prod uses standard peer
   discovery ([`RUNBOOK.md`](RUNBOOK.md) §4).
 - **Secrets stay out of git**: `.gitignore` blocks keys, `.env`, `.pgpass`, and the Slack
@@ -218,8 +220,8 @@ the latest at time of writing.
 
 | Component | Version |
 |---|---|
-| cardano-node | 10.6.2 |
-| cardano-db-sync | 13.6.0.5 |
+| cardano-node | 11.0.1 |
+| cardano-db-sync | 13.7.2.1 |
 | midnight-node | 0.22.2 (tag `node-0.22.2`) |
 | PostgreSQL | 17 |
 | Mithril client | `unstable` channel |
@@ -255,9 +257,9 @@ the latest at time of writing.
   for Lightsail and explicitly recommends EC2 (GP2/Provisioned IOPS) for sustained-IOPS or
   large-database workloads, which this is. Lightsail still completes pre-prod (small DB +
   Mithril), just slower; EC2 `gp3` (to 16,000) or `io2` (>20,000) meets the spec. Noted throughout.
-- **db-sync download URL.** The upstream command mixes tag `13.6.0.5` with filename `13.6.0.7`
+- **db-sync download URL.** The upstream command mixes a tag with a different filename version
   and 404s. [`RUNBOOK.md`](RUNBOOK.md) §2.4 flags it, and `scripts/setup_node.sh` uses a
-  verified matched pair (tag+file `13.6.0.5`).
+  verified matched tag+file (`13.7.2.1`), paired to the node version for the current hard fork.
 
 ## Roadmap / possible improvements
 

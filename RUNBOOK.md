@@ -183,9 +183,12 @@ The snapshot is saved to a `db/` directory in your current path.
 
 **2.2.1 Download Cardano node binaries**
 ```bash
+# Runtime libs cardano-node 11.x links against (LSM storage):
+sudo apt-get install -y liburing2 libsnappy1v5
+
 mkdir -p ~/.local/bin ~/.local/share
 
-VERSION="10.6.2"
+VERSION="11.0.1"
 ARCH="linux-amd64"
 URL="https://github.com/IntersectMBO/cardano-node/releases/download/${VERSION}/cardano-node-${VERSION}-${ARCH}.tar.gz"
 
@@ -195,17 +198,23 @@ chmod +x ~/.local/bin/cardano-*
 
 cardano-node --version
 ```
+> **Gotcha — pin to the network's *current* required version, not a stale one.** preprod ran the
+> **van Rossem (PV11)** intra-era hard fork in late June 2026. A node older than the fork
+> (`≤10.7.1`) is rejected with `HeaderError ... ObsoleteNode`, replays only up to the fork slot,
+> and then stalls — every peer refuses it. `11.0.1` is the first release that crosses PV11. Before
+> a fresh install, check the [cardano-node releases](https://github.com/IntersectMBO/cardano-node/releases)
+> for the version the network currently requires rather than copying a number from any doc.
 > **Gotcha — `share` extraction (corrected from the source docs).** The upstream doc extracts
 > `share` with `--strip-components=1`, but the tarball entries are `./share/preprod/...`, so
 > `1` lands the files at `~/.local/share/**share**/preprod/config.json` while the systemd unit
 > (and the db-sync `NodeConfigFile`) expect `~/.local/share/preprod/config.json`. With the
 > doc's value cardano-node **fails to start** ("config not found") and nothing syncs. Use
 > **`--strip-components=2`** (as above) so configs land at `~/.local/share/preprod/`. Verified
-> against the real 10.6.2 tarball. `scripts/setup_node.sh` already uses `2`. Sanity-check after:
+> against the real 11.0.1 tarball. `scripts/setup_node.sh` already uses `2`. Sanity-check after:
 > `ls ~/.local/share/preprod/config.json`.
 >
 > **NOTE (added) — verify the download (supply chain).** The release ships
-> `cardano-node-10.6.2-sha256sums.txt`. To check before trusting the binary:
+> `cardano-node-11.0.1-sha256sums.txt`. To check before trusting the binary:
 > ```bash
 > cd ~/tmp && curl -L -O "$URL" && curl -L -O "https://github.com/IntersectMBO/cardano-node/releases/download/${VERSION}/cardano-node-${VERSION}-sha256sums.txt"
 > sha256sum -c cardano-node-${VERSION}-sha256sums.txt --ignore-missing
@@ -316,8 +325,8 @@ sudo systemctl restart postgresql   # apply the tuning
 NETWORK="preprod"
 mkdir -p ~/tmp && cd ~/tmp
 # matched tag+filename (see Gotcha below — the upstream doc mismatched these and 404s)
-curl -L -O https://github.com/IntersectMBO/cardano-db-sync/releases/download/13.6.0.5/cardano-db-sync-13.6.0.5-linux.tar.gz
-tar -xzf cardano-db-sync-13.6.0.5-linux.tar.gz
+curl -L -O https://github.com/IntersectMBO/cardano-db-sync/releases/download/13.7.2.1/cardano-db-sync-13.7.2.1-linux.tar.gz
+tar -xzf cardano-db-sync-13.7.2.1-linux.tar.gz
 
 # The tarball ships bin/ and schema/ read-only (0555). Use `cp -f` so a re-run can replace the
 # read-only binaries in place, and `cp -a` (not `mv`) for schema: moving a directory to a new
@@ -333,11 +342,14 @@ curl -O https://book.world.dev.cardano.org/environments/$NETWORK/db-sync-config.
 sed -i "s|\"NodeConfigFile\": \"config.json\"|\"NodeConfigFile\": \"/home/midnight/.local/share/$NETWORK/config.json\"|" ~/cardano-data/db-sync-config.json
 ```
 
-> **Gotcha — version mismatch in the upstream doc (corrected above).** The upstream doc's URL
-> mixes tag **`13.6.0.5`** with filename **`13.6.0.7`**, so it 404s. Verified against the
-> releases page: each tag ships a matching asset — tag `13.6.0.5` → `cardano-db-sync-13.6.0.5-linux.tar.gz`,
-> tag `13.6.0.7` → `cardano-db-sync-13.6.0.7-linux.tar.gz`. The command above uses the matched
-> pair `13.6.0.5`; `scripts/setup_node.sh` does the same.
+> **Gotcha — match db-sync to the node version, and match tag to filename.** Two traps here:
+> (1) db-sync must be paired with the running node — `13.7.2.1` is the release that matches
+> cardano-node `11.0.1`/PV11; an older db-sync against an 11.x node can stall. Check the
+> [db-sync releases](https://github.com/IntersectMBO/cardano-db-sync/releases) for the pairing.
+> (2) The upstream doc mixed a tag with a *different* filename (e.g. tag `13.6.0.5` with file
+> `13.6.0.7`), which 404s — each tag ships a filename that matches its own version
+> (`cardano-db-sync-13.7.2.1-linux.tar.gz`). The command above uses the matched pair;
+> `scripts/setup_node.sh` does the same.
 > Releases: https://github.com/IntersectMBO/cardano-db-sync/releases
 >
 > **Supply chain:** unlike cardano-node and midnight-node, cardano-db-sync ships **no checksum
@@ -833,9 +845,9 @@ Reproduced from the FNO WireGuard page for completeness. **Skip entirely on pre-
 
 | Component | Version | Port |
 |---|---|---|
-| cardano-node | 10.6.2 | 3001 (P2P) |
+| cardano-node | 11.0.1 | 3001 (P2P) |
 | PostgreSQL | 17 | 5432 |
-| cardano-db-sync | 13.6.0.x | — (Unix socket) |
+| cardano-db-sync | 13.7.2.1 | — (Unix socket) |
 | midnight-node | 0.22.2 | 9933 (RPC), 6000 (P2P), 9615 (Prometheus, if enabled) |
 | WireGuard (mainnet only) | v1.0.20250521 | 51820 |
 

@@ -17,8 +17,8 @@ SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 readonly SCRIPT_NAME
 readonly VERSION="1.0.0"
 
-readonly CARDANO_NODE_VERSION="10.6.2"
-readonly DBSYNC_VERSION="13.6.0.5"    # verified: tag 13.6.0.5 ships cardano-db-sync-13.6.0.5-linux.tar.gz (matched pair)
+readonly CARDANO_NODE_VERSION="11.0.1"   # PV11/van Rossem hard fork: ≤10.7.1 is obsolete on preprod. Check release notes for the current requirement.
+readonly DBSYNC_VERSION="13.7.2.1"       # matched to node 11.0.1; asset: cardano-db-sync-13.7.2.1-linux.tar.gz
 readonly MIDNIGHT_NODE_VERSION="0.22.2"
 readonly PG_VERSION="17"
 
@@ -122,7 +122,8 @@ function user_home() { echo "/home/${node_user}"; }
 function stage_prereqs() {
     log_info "installing base packages and creating service user '${node_user}'"
     run apt-get update -y
-    run apt-get install -y curl wget jq unzip gnupg ca-certificates pv build-essential pkg-config
+    # liburing2 + libsnappy1v5: runtime shared libs cardano-node 11.x links against (LSM storage).
+    run apt-get install -y curl wget jq unzip gnupg ca-certificates pv build-essential pkg-config liburing2 libsnappy1v5
     if id -u "${node_user}" >/dev/null 2>&1; then
         log_debug "user ${node_user} already exists"
     else
