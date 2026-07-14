@@ -40,7 +40,7 @@ db_secret=""            # AWS Secrets Manager secret name/id holding {"password"
 db_password_file=""     # alternative: read password from a file
 slack_secret=""         # optional Slack webhook secret
 stages_csv="all"
-min_sync_percent=99
+max_lag_seconds=180     # db-sync is "caught up" when its latest block trails the tip by <= this
 wait_sync=false
 dry_run=false
 no_color=false
@@ -344,23 +344,65 @@ EOF
     log_warn "db-sync may sit idle 5-20 min before rows appear; full sync takes hours"
 }
 
-# ─── Stage: verify sync (report %, optionally wait) ───────────────────────────────────
-function _sync_percent() {
+# ─── Stage: verify sync (report lag, optionally wait) ─────────────────────────────────
+# Readiness is measured by how far db-sync's latest block trails the live chain, NOT by a
+# time-weighted "percent". On a chain that is years old, a time ratio rounds to 100% while the
+# DB is still a full day behind — useless as a gate. Lag-in-seconds does not saturate: it only
+# reaches ~0 when db-sync has actually caught up to the tip.
+
+function _magic_arg() {
+    case "${network}" in
+        mainnet) echo "--mainnet" ;;
+        preprod) echo "--testnet-magic 1" ;;
+        preview) echo "--testnet-magic 2" ;;
+        *)       echo "--testnet-magic 1" ;;
+    esac
+}
+
+# cardano-node's own tip as JSON (block/slot/syncProgress); empty if the socket isn't up yet.
+function _node_tip_json() {
+    local sock; sock="$(user_home)/cardano-data/db/node.socket"
+    [[ -S "${sock}" ]] || return 1
+    # shellcheck disable=SC2046
+    sudo -u "${node_user}" bash -lc "CARDANO_NODE_SOCKET_PATH='${sock}' '$(user_home)/.local/bin/cardano-cli' query tip $(_magic_arg)" 2>/dev/null
+}
+
+# db-sync's latest block number in cexplorer (0 if no rows yet).
+function _dbsync_block() {
+    sudo -u "${node_user}" psql -d cexplorer -tAc "SELECT COALESCE(max(block_no),0) FROM block;" 2>/dev/null | tr -d ' '
+}
+
+# Seconds db-sync's latest block trails wall-clock (a huge sentinel if the table is empty).
+function _sync_lag_seconds() {
     sudo -u "${node_user}" psql -d cexplorer -tAc \
-      "SELECT COALESCE(round(100*(EXTRACT(epoch FROM (MAX(time) AT TIME ZONE 'UTC')) - EXTRACT(epoch FROM (MIN(time) AT TIME ZONE 'UTC'))) / NULLIF(EXTRACT(epoch FROM (NOW() AT TIME ZONE 'UTC')) - EXTRACT(epoch FROM (MIN(time) AT TIME ZONE 'UTC')),0)),0) FROM block;" 2>/dev/null | tr -d ' '
+        "SELECT COALESCE(EXTRACT(epoch FROM (now() - max(time)))::bigint, 999999999) FROM block;" 2>/dev/null | tr -d ' '
+}
+
+# Pretty-print a seconds count as HhMMmSSs.
+function _fmt_lag() { local s="${1:-0}"; printf '%dh%02dm%02ds' "$((s/3600))" "$(((s%3600)/60))" "$((s%60))"; }
+
+function _report_sync() {
+    local node_json; node_json="$(_node_tip_json || true)"
+    if [[ -n "${node_json}" ]]; then
+        log_info "cardano-node: syncProgress $(printf '%s' "${node_json}" | jq -r '.syncProgress // "?"')% (tip block $(printf '%s' "${node_json}" | jq -r '.block // "?"'))"
+    else
+        log_warn "cardano-node socket not ready (still replaying?) — cannot read node tip yet"
+    fi
+    local lag; lag="$(_sync_lag_seconds || echo 999999999)"; lag="${lag:-999999999}"
+    log_info "cardano-db-sync: latest block $(_dbsync_block), $(_fmt_lag "${lag}") behind tip"
 }
 
 function stage_verify_sync() {
-    if is_dry_run; then log_info "[dry-run] would query cexplorer sync %"; return 0; fi
-    local pct; pct="$(_sync_percent || echo 0)"; pct="${pct:-0}"
-    log_info "cardano-db-sync progress: ${pct}%"
+    if is_dry_run; then log_info "[dry-run] would report node syncProgress + db-sync lag"; return 0; fi
+    _report_sync
     if [[ "${wait_sync}" == true ]]; then
-        while (( ${pct%.*} < min_sync_percent )); do
-            log_info "waiting for db-sync >= ${min_sync_percent}% (currently ${pct}%) ..."
+        local lag; lag="$(_sync_lag_seconds || echo 999999999)"; lag="${lag:-999999999}"
+        while (( lag > max_lag_seconds )); do
+            log_info "waiting for db-sync lag <= ${max_lag_seconds}s (currently $(_fmt_lag "${lag}")) ..."
             sleep 120
-            pct="$(_sync_percent || echo 0)"; pct="${pct:-0}"
+            lag="$(_sync_lag_seconds || echo 999999999)"; lag="${lag:-999999999}"
         done
-        log_info "db-sync reached ${pct}%"
+        log_info "db-sync caught up (lag $(_fmt_lag "${lag}"))"
     fi
 }
 
@@ -440,10 +482,10 @@ EOF
 function stage_service() {
     local home; home="$(user_home)"
     if [[ "${wait_sync}" != true ]] && ! is_dry_run; then
-        local pct; pct="$(_sync_percent || echo 0)"; pct="${pct:-0}"
-        if (( ${pct%.*} < min_sync_percent )); then
-            log_warn "db-sync only ${pct}% (< ${min_sync_percent}%). Writing the unit but NOT starting the validator yet."
-            log_warn "re-run '--stage service --wait-sync' (or start manually) once sync completes."
+        local lag; lag="$(_sync_lag_seconds || echo 999999999)"; lag="${lag:-999999999}"
+        if (( lag > max_lag_seconds )); then
+            log_warn "db-sync lag $(_fmt_lag "${lag}") (> ${max_lag_seconds}s). Writing the unit but NOT starting the validator yet."
+            log_warn "re-run '--stage service --wait-sync' (or start manually) once db-sync catches up."
         fi
     fi
     log_info "installing midnight-node validator service"
@@ -477,14 +519,14 @@ WantedBy=multi-user.target
 EOF
     run systemctl daemon-reload
     run systemctl enable midnight-node
-    local pct
+    local lag
     if is_dry_run; then
-        pct=100
+        lag=0
     else
-        pct="$(_sync_percent || echo 0)"
+        lag="$(_sync_lag_seconds || echo 999999999)"
     fi
-    pct="${pct:-0}"
-    if (( ${pct%.*} >= min_sync_percent )) || [[ "${wait_sync}" == true ]]; then
+    lag="${lag:-999999999}"
+    if (( lag <= max_lag_seconds )) || [[ "${wait_sync}" == true ]]; then
         run systemctl start midnight-node
     fi
 }
@@ -534,8 +576,8 @@ Options:
   --user USER          Service user (default: ${node_user})
   --network NET        Midnight network (default: ${network})
   --node-name NAME     Telemetry node name (default: ${node_name})
-  --wait-sync          Block until db-sync >= --min-sync-percent before starting the validator
-  --min-sync-percent N Sync threshold to start the validator (default: ${min_sync_percent})
+  --wait-sync          Block until db-sync lag <= --max-lag-seconds before starting the validator
+  --max-lag-seconds N  Max db-sync lag behind the chain tip to start the validator (default: ${max_lag_seconds})
   --dry-run            Log every action without executing anything
   -v, --verbose        DEBUG logging
   --no-color           Disable coloured logs (also honours NO_COLOR)
@@ -561,7 +603,7 @@ function parse_arguments() {
             --network)           network="${2}"; shift 2 ;;
             --node-name)         node_name="${2}"; shift 2 ;;
             --wait-sync)         wait_sync=true; shift ;;
-            --min-sync-percent)  min_sync_percent="${2}"; shift 2 ;;
+            --max-lag-seconds)   max_lag_seconds="${2}"; shift 2 ;;
             --dry-run)           dry_run=true; shift ;;
             -v|--verbose)        current_log_level="${LOG_LEVEL_DEBUG}"; shift ;;
             --no-color)          no_color=true; shift ;;

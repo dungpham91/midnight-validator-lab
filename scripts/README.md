@@ -56,7 +56,7 @@ Notes:
 | `--db-secret NAME` | Secrets Manager id with `{"password": ...}` (preferred) |
 | `--db-password-file F` | Read the password from a file instead |
 | `--region`, `--user`, `--network`, `--node-name` | Overrides (defaults: ap-southeast-1 / midnight / preprod / hostname) |
-| `--wait-sync`, `--min-sync-percent N` | Block until db-sync ≥ N% before starting the validator (default 99) |
+| `--wait-sync`, `--max-lag-seconds N` | Block until db-sync's latest block trails the chain tip by ≤ N seconds before starting the validator (default 180) |
 | `--dry-run`, `-v/--verbose`, `--no-color` | Log-only run / DEBUG / no colour |
 
 > Idempotent where practical (checks for existing user/role/db before creating). If a stage
