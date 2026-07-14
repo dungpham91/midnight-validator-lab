@@ -99,7 +99,12 @@ curl -s -d '{"jsonrpc":"2.0","id":1,"method":"system_peers","params":[]}' \
 ```bash
 sudo -u midnight ./scripts/node_health_check.py --once --verbose | tee evidence/06-health-check.txt
 ```
-📷 Screenshot the coloured PASS/FAIL summary.
+📷 Screenshot the coloured PASS/FAIL summary. **Expected here: `DEGRADED`** — `rpc_reachable` and
+`sync_gap` pass, while `peer_count` (1 < 3) and `has_block_height` (0) fail. That is the checker
+working correctly: it honestly reports the known state (small preprod peer set / one bootnode
+unreachable, and an unauthorised FNO sitting at genesis), rather than green-washing. The thresholds
+are production-sensible defaults; a green run is expected only for an authorised node with peers and
+a rising height.
 
 **5. Monitoring dashboard (Grafana):**
 ```bash
