@@ -31,6 +31,18 @@ So the sensible pattern is:
 > epochs) and this node is torn down afterwards. So "authored blocks" is intentionally out of scope;
 > the evidence to collect is the *syncing/importing* node with keys loaded, not produced blocks.
 
+> **What was actually observed on this run (be honest about the two layers):**
+> - **Cardano layer — real block progression.** `cardano-node` crossed the van Rossem/PV11 hard
+>   fork (syncProgress → 100), and `cardano-db-sync` imported Cardano blocks into `cexplorer` with
+>   `block_no` climbing (e.g. 4929534 → 4933636). This is the demonstrable block-height increase.
+> - **Midnight layer — operational, at genesis.** The node runs in `--validator` mode with session
+>   keys loaded and peers with the **official preprod bootnode**, on the correct chain (its genesis
+>   `bestHash` matches). But `system_syncState` shows `highestBlock: 0` and the connected bootnode
+>   itself reports `bestNumber: 0` — there is no block above genesis exposed to import, so the node
+>   is *synced to what the network shows*, not stuck. A fresh, unauthorised FNO advancing its own
+>   Midnight height is gated on committee authorisation + the n+2 epoch, which is out of lab scope.
+>   Evidence here = node up, on the right chain, keys loaded, peered — not a rising Midnight height.
+
 ## Evening — start the long sync
 
 ```bash
