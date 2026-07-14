@@ -261,6 +261,74 @@ the latest at time of writing.
   and 404s. [`RUNBOOK.md`](RUNBOOK.md) §2.4 flags it, and `scripts/setup_node.sh` uses a
   verified matched tag+file (`13.7.2.1`), paired to the node version for the current hard fork.
 
+## Troubleshooting log (first real pre-prod run)
+
+Field notes from bringing the node up end-to-end on a fresh Ubuntu 24.04 EC2 host. Each entry
+is symptom → evidence → root cause → fix, in the order they surfaced. The fixes are in
+`scripts/setup_node.sh` and `RUNBOOK.md`.
+
+### 1. db-sync install aborts moving the schema dir
+
+```
+mv: cannot move '/home/midnight/tmp/schema' to '/home/midnight/cardano-data/schema': Permission denied
+```
+
+The install runs as the non-root `midnight` user. The db-sync tarball ships `schema/` **read-only
+(0555)**, and moving a *directory* to a new parent needs write permission on the directory itself
+(the kernel has to rewrite its `..` entry) — which 0555 denies to a non-root user. The RUNBOOK hid
+this by using `sudo mv` (root bypasses the check); the script, correctly running as the service
+user, hit it. **Fix:** `cp -a` instead of `mv` (copying needs no write on the source), then
+`chmod -R u+w` so the dir is idempotently removable on a re-run.
+
+### 2. db-sync re-run can't overwrite its binaries
+
+```
+cp: cannot create regular file '/home/midnight/.local/bin/cardano-db-sync': Permission denied
+```
+
+Same read-only-artifact root cause, second face: the tarball's **binaries are 0555** too, so a
+second run's `cp` can't overwrite them in place, and the non-root user can't `rm` inside a leftover
+0555 dir either. **Fix:** `cp -f` (unlinks the read-only target and recreates it) plus a
+`chmod -R u+w` → `rm -rf` cleanup of any prior extract before untarring.
+
+### 3. db-sync logs "node.socket does not exist"
+
+```
+Connection Attempt Exception, destination LocalAddress ".../db/node.socket"
+  exception: Network.Socket.connect: does not exist (No such file or directory)
+```
+
+**Not a bug** — startup ordering. cardano-node only opens its local socket after it finishes
+replaying the ledger from the Mithril snapshot (tens of minutes on first boot). db-sync
+(`Requires=cardano-node`) simply retries every ~20 s until the socket appears. No action needed;
+documented so it isn't mistaken for a failure.
+
+### 4. "sync 100%" while still a day behind
+
+`--stage verify-sync` reported `100%` even though `now() - max(block.time)` was **~1 day**. The
+original metric was *time-weighted* — `(max−min)/(now−min)` over block timestamps — which, on a
+chain that is years old, rounds to 100% while the DB is still a full day short. Useless as a gate
+to start the validator. **Fix:** measure **lag in seconds** (`now() - max(block.time)`), which does
+not saturate, and report cardano-node's own `syncProgress` alongside it. The `--min-sync-percent`
+flag became `--max-lag-seconds` (default 180).
+
+### 5. cardano-node stalls at the hard-fork boundary
+
+```
+ChainSync.Client.Exception ... HeaderError ... ObsoleteNode (Version 11) (Version 10)
+Net.Peers.Ledger.NotEnoughBigLedgerPeers {"numOfBigLedgerPeers":15,"target":75}
+cardano-cli query tip → "syncProgress": "99.93"   (stuck; block/slot not advancing)
+```
+
+The node reached the Mithril snapshot tip and then **could not advance** — every peer's header was
+rejected with `ObsoleteNode`. preprod had run the **van Rossem (PV11)** intra-era hard fork in late
+June 2026, and `cardano-node 10.6.2` (the version pinned from the docs) is too old to decode
+protocol-version-11 headers. Clock and topology were fine — it was purely a stale binary.
+**Fix:** upgrade to `cardano-node 11.0.1` (first release across PV11) and the matched
+`cardano-db-sync 13.7.2.1`, add the `liburing2`/`libsnappy1v5` runtime libs node 11.x needs, and
+reframe version pinning to track the network's *current* hard-fork requirement (verified against
+upstream release notes) rather than a fixed number copied from a doc.
+
 ## Roadmap / possible improvements
 
 Already done in this repo: **IaC** ([`terraform/`](terraform/) — host + `gp3` volume with
